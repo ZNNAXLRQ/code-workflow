@@ -1,0 +1,3 @@
+.local-workflow/
+node_modules/
+*.log
