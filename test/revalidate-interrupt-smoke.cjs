@@ -51,6 +51,8 @@ const config = () => ({ pipeline: true, maxParallel: '1', maxRepairs: 2, useClin
     await second.load();
     const reloaded = second.stageWorker(worker.state.id);
     assert.equal(reloaded.state.phase, '待重新验证');
+    await reloaded.action('revalidate');
+    assert.equal(reloaded.state.phase, '待验收');
     await reloaded.action('accept');
     assert.equal(reloaded.state.phase, '已验收');
     assert.equal(await git(repo, 'show', target + ':a.txt'), 'one');

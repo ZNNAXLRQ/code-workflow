@@ -331,6 +331,9 @@ function stageActions(stage) {
     box.append(actionButton('回退本轮',
         () => send('action', { action: 'rollback', task: candidate.id, run: stage.id }), 'secondary', !candidate));
     const accepting = phase === '待验收' || stageBadgeName(stage) === '待验收';
+    const revalidating = phase === '待重新验证';
+    box.append(actionButton('继续重新验证',
+        () => send('action', { action: 'revalidate', run: stage.id }), 'primary', !revalidating));
     box.append(actionButton('验收',
         () => send('action', { action: 'accept', run: stage.id }), 'primary', !accepting));
     box.append(actionButton('重试',

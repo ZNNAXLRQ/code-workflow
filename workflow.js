@@ -960,6 +960,8 @@ class Workflow {
             }
         } else if (command === 'accept' && ['待验收', '待重新验证'].includes(phase)) {
             await this.acceptStage();
+        } else if (command === 'revalidate' && phase === '待重新验证') {
+            await this.finishStage();
         } else if (command === 'reject' && phase === '待验收') {
             if (!feedback?.trim()) throw new Error('请先填写退回意见');
             return await this.planSingleFollowup(feedback.trim(), true);

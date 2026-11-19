@@ -574,8 +574,12 @@ function activate(context) {
         if (!changed) return;
         try {
             item.clineHandoff = clineFrontend.writeHandoff(item.repo, { ...handoff, queue });
-            await publish();
-        } catch (error) { channel.appendLine('[frontend] 记录 Cline 交接进度失败：' + error.message); }
+        } catch (error) {
+            channel.appendLine('[frontend] 记录 Cline 交接进度失败：' + error.message);
+            throw error;
+        }
+        try { await publish(); }
+        catch (error) { channel.appendLine('[frontend] 刷新 Cline 交接进度失败：' + error.message); }
     }
 
     function stopClineWatch(item) {
@@ -650,6 +654,10 @@ function activate(context) {
         item.reviewBroker?.cancelAll('切回 Codex 前端');
         let threadId = item.codexThreadId;
         try { threadId = bindingStore.readBinding(item.repo)?.codexThreadId || threadId; } catch {}
+        await item.outbox.load();
+        const queued = new Set(Object.values(item.outbox.entries)
+            .filter(entry => entry.kind === 'handoff')
+            .flatMap(entry => entry.meta?.handoffIds || []));
         const queue = (handoff?.queue || []).map(entry => ({ ...entry,
             id: entry.id || 'req-' + randomUUID() }));
         if (handoff) {
@@ -659,7 +667,7 @@ function activate(context) {
                 handoff = item.clineHandoff;
             } catch (error) { log('[frontend] 持久化 Cline 请求 ID 失败：' + error.message); }
         }
-        const pending = queue.filter(entry => !entry.handedOff);
+        const pending = queue.filter(entry => !entry.handedOff && !queued.has(entry.id));
         if (threadId && handoff) {
             const message = [
                 '已从 Cline 前端切回 Codex。',
@@ -673,7 +681,7 @@ function activate(context) {
                 kind: 'handoff', meta: { handoffIds: pending.map(entry => entry.id) }
             });
             const delivered = item.outbox.entries[receipt.id]?.status === 'acked';
-            if (delivered) await markClineHandedOff(item, pending.map(entry => entry.id));
+            if (delivered) await markClineHandedOff(item, receipt.meta?.handoffIds || []);
             else log('[frontend] 交接消息尚未确认送达，queue 保持未交接状态');
         } else if (handoff) {
             vscode.window.showWarningMessage('已切回 Codex，但还没有绑定 Codex 会话；交接文件已保存，绑定后 Codex 可读取。');

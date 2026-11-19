@@ -40,6 +40,12 @@ class AckBridge {
     assert.equal(again.id, entry.id);
     assert.equal(bridge.messages.length, 1, 'same handoff request must not be sent twice');
 
+    const partial = await second.enqueue('thread', 'handoff A and B', {
+        kind: 'handoff', meta: { handoffIds: ['req-1', 'req-2'] }
+    });
+    assert.notEqual(partial.id, entry.id, 'a partial overlap must not reuse the old receipt');
+    assert.equal(bridge.messages.length, 2, 'the new request in the partial batch must be sent');
+
     first.stop();
     second.stop();
     await fs.rm(dir, { recursive: true, force: true });

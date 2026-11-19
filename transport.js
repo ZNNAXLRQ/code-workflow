@@ -246,9 +246,11 @@ class Outbox {
             await this.load();
             if (meta?.handoffIds?.length) {
                 const wanted = new Set(meta.handoffIds);
-                existing = Object.values(this.entries).find(candidate =>
-                    candidate.kind === 'handoff' &&
-                    (candidate.meta?.handoffIds || []).some(requestId => wanted.has(requestId))) || null;
+                existing = Object.values(this.entries).find(candidate => {
+                    if (candidate.kind !== 'handoff') return false;
+                    const ids = new Set(candidate.meta?.handoffIds || []);
+                    return [...wanted].every(requestId => ids.has(requestId));
+                }) || null;
             }
             if (existing) return;
             this.entries[id] = entry;
