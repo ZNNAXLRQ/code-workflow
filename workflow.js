@@ -774,13 +774,16 @@ class Workflow {
                 throw error;
             }
         } finally {
-            activeAcceptTemps.delete(temporary);
             try {
-                await git(this.repo, 'worktree', 'remove', temporary);
-                delete this.state.acceptTemp;
-                await this.save();
-            } catch (error) {
-                this.log('[accept] 验收临时工作树未自动移除，已保留：' + temporary + '：' + error.message);
+                try {
+                    await git(this.repo, 'worktree', 'remove', temporary);
+                    delete this.state.acceptTemp;
+                    await this.save();
+                } catch (error) {
+                    this.log('[accept] 验收临时工作树未自动移除，已保留：' + temporary + '：' + error.message);
+                }
+            } finally {
+                activeAcceptTemps.delete(temporary);
             }
         }
     }

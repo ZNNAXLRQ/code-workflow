@@ -375,6 +375,7 @@ class Outbox {
                     const due = entry.status === 'pending' ||
                         (entry.status === 'sent' && Date.now() - Date.parse(entry.sentAt || 0) > this.graceMs);
                     if (!due) continue;
+                    if (this.canSend && !this.canSend(entry)) continue;
                     try {
                         await this.bridge.sendMessage(entry.threadId, entry.prompt);
                     } catch (error) {
