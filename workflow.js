@@ -681,6 +681,11 @@ class Workflow {
     async mergeStage(target) {
         const head = this.state.stageHead;
         const message = `merge: 工作流阶段 ${this.state.id} 验收`;
+        const tip = (await git(this.repo, 'rev-parse', target)).trim();
+        if (this.state.targetHead && tip !== this.state.targetHead) {
+            throw new Error('目标分支在规划后已更新（' + this.state.targetHead.slice(0, 8) +
+                ' → ' + tip.slice(0, 8) + '），不能在未重新测试合并结果的情况下验收。请重新规划/测试。');
+        }
         const current = (await git(this.repo, 'rev-parse', '--abbrev-ref', 'HEAD')).trim();
         if (current === target) {
             if ((await git(this.repo, 'status', '--porcelain')).trim()) {
@@ -716,16 +721,33 @@ class Workflow {
     }
 
     async cleanupStage() {
+        const preserved = [];
         for (const task of this.state.tasks || []) {
             if (!task.tree) continue;
-            await git(this.repo, 'worktree', 'remove', '--force', task.tree).catch(() => {});
+            try {
+                await git(this.repo, 'worktree', 'remove', task.tree);
+            } catch (error) {
+                preserved.push({ path: task.tree, reason: error.message });
+            }
         }
         if (this.state.stageTree) {
-            await git(this.repo, 'worktree', 'remove', '--force', this.state.stageTree).catch(() => {});
+            try {
+                await git(this.repo, 'worktree', 'remove', this.state.stageTree);
+            } catch (error) {
+                preserved.push({ path: this.state.stageTree, reason: error.message });
+            }
         }
         if (this.state.stageBranch) {
-            await git(this.repo, 'branch', '-D', this.state.stageBranch).catch(() => {});
+            try {
+                await git(this.repo, 'branch', '-D', this.state.stageBranch);
+            } catch (error) {
+                if (!preserved.some(item => item.path === this.state.stageTree)) {
+                    preserved.push({ path: this.state.stageTree || this.state.stageBranch, reason: error.message });
+                }
+            }
         }
+        this.state.preservedWorktrees = preserved;
+        if (this.owner) this.owner.preservedWorktrees = [...(this.owner.preservedWorktrees || []), ...preserved];
     }
 
     async acceptStage() {
@@ -737,12 +759,11 @@ class Workflow {
             throw new Error('提交方案时没有锁定目标分支（当时处于 detached HEAD），无法验收合并。');
         }
         await this.mergeStage(this.state.targetBranch);
+        await this.cleanupStage();
         this.state.phase = '已验收';
         this.archiveCurrent();
         if (this.pipelineOwner) this.owner.stages.delete(this.state.id);
         await this.save();
-        try { await this.cleanupStage(); }
-        catch (error) { this.log('[cleanup] ' + error.message); }
     }
 
     async planSingleFollowup(feedback, fromUser = false) {
@@ -1208,6 +1229,8 @@ class Workflow {
             delete task.pendingReview;
             task.review = review;
             await this.save();
+            try { this.reviewJournal?.commit({ stageId: this.state.id, taskId: task.id, candidate: sha }); }
+            catch (error) { this.log('[review-journal] ' + error.message); }
             if (review.verdict === 'blocked') throw new Error(review.summary || '审查缺少证据');
             if (review.verdict === 'changes_requested') {
                 task.fileRepairs = repairsByFile(review.findings, task.paths);
@@ -1297,6 +1320,8 @@ class Workflow {
             if (review.verdict === 'changes_requested') {
                 const scoped = repairsByFile(review.findings, this.state.tasks.flatMap(task => task.paths));
                 await this.stageRepair(JSON.stringify(review.findings.filter(item => item.blocking)), scoped);
+                try { this.reviewJournal?.commit({ stageId: this.state.id, taskId: 'stage', candidate: sha }); }
+                catch (error) { this.log('[review-journal] ' + error.message); }
                 return;
             }
             this.state.phase = review.verdict === 'pass' ? '待验收' : '需处理';
@@ -1312,6 +1337,8 @@ class Workflow {
             this.schedule();
         }
         await this.save();
+        try { this.reviewJournal?.commit({ stageId: this.state.id, taskId: 'stage', candidate: sha }); }
+        catch (error) { this.log('[review-journal] ' + error.message); }
     }
 
     async stageRepair(feedback, scoped) {

@@ -23,6 +23,8 @@ const review = {
 assert.equal(journal.accept('batch-1', [review]), 1);
 assert.equal(journal.openBatches().length, 0);
 assert.deepEqual(journal.take({ stageId: 'stage-1', taskId: 'task-1', candidate }), review);
+assert.deepEqual(journal.take({ stageId: 'stage-1', taskId: 'task-1', candidate }), review);
+assert.equal(journal.commit({ stageId: 'stage-1', taskId: 'task-1', candidate }), true);
 assert.equal(journal.take({ stageId: 'stage-1', taskId: 'task-1', candidate }), null);
 
 journal.recordBatch({ id: 'batch-2', entries: [entry] });
@@ -34,6 +36,7 @@ const reloaded = new ReviewJournal(file);
 assert.equal(reloaded.openBatches().length, 1);
 reloaded.accept('batch-2', [review]);
 assert.deepEqual(reloaded.take({ stageId: 'stage-1', taskId: 'task-1', candidate }), review);
+assert.equal(reloaded.commit({ stageId: 'stage-1', taskId: 'task-1', candidate }), true);
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('review journal smoke passed');

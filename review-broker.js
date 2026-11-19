@@ -394,8 +394,8 @@ function createReviewBroker({
             throw error;
         }
         closeBatch(state, 'resolved');
-        try { journal?.clearBatch(batchId); }
-        catch (error) { log('清理审查批次日志失败：' + error.message); }
+        try { journal?.accept(batchId, results); }
+        catch (error) { log('审查结论写入恢复日志失败：' + error.message); }
         let count = 0;
         for (const { record, result } of items) {
             if (fulfill(record, result)) count++;

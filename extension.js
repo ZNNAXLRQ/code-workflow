@@ -552,6 +552,13 @@ function activate(context) {
         fs.appendFile(path.join(dir, 'events.log'), new Date().toISOString() + ' ' + message + '\n').catch(() => {});
     };
 
+    function showPreserved(worker) {
+        const preserved = worker.state?.preservedWorktrees || [];
+        if (!preserved.length) return;
+        vscode.window.showWarningMessage('已验收，但以下工作树有未提交改动，已保留：\n' +
+            preserved.map(item => item.path).join('\n'));
+    }
+
     function stopClineWatch(item) {
         if (item.clineWatch) item.clineWatch();
         item.clineWatch = null;
@@ -624,16 +631,37 @@ function activate(context) {
         item.reviewBroker?.cancelAll('切回 Codex 前端');
         let threadId = item.codexThreadId;
         try { threadId = bindingStore.readBinding(item.repo)?.codexThreadId || threadId; } catch {}
+        const queue = (handoff?.queue || []).map(entry => ({ ...entry,
+            id: entry.id || 'req-' + randomUUID() }));
+        if (handoff) handoff = { ...handoff, queue };
+        const pending = queue.filter(entry => !entry.handedOff);
         if (threadId && handoff) {
             const message = [
                 '已从 Cline 前端切回 Codex。',
                 '请读取交接文件：' + clineFrontend.handoffPath(item.repo),
                 '先同步进度；Cline 模式下没有 Codex 审查，不要把已完成的 Cline 任务重新送审。',
-                '然后清理审查队列，把交接文件 queue 里的请求按顺序规划。',
+                '然后清理审查队列，只规划尚未交接的 queue 请求（已交接的不要重复规划）。',
                 '',
-                clineFrontend.handoffDigest(handoff)
+                clineFrontend.handoffDigest({ ...handoff, queue: pending })
             ].join('\n');
-            await item.outbox.enqueue(threadId, message, { kind: 'handoff' });
+            const receipt = await item.outbox.enqueue(threadId, message, { kind: 'handoff' });
+            const delivered = item.outbox.entries[receipt.id]?.status === 'acked';
+            if (!delivered) log('[frontend] 交接消息尚未确认送达，queue 保持未交接状态');
+            const handedOff = new Set(delivered ? pending.map(entry => entry.id) : []);
+            if (handedOff.size) {
+                let latest = handoff;
+                try { latest = clineFrontend.readHandoff(item.repo) || handoff; } catch {}
+                const now = new Date().toISOString();
+                const updated = {
+                    ...latest,
+                    queue: (latest.queue || []).map(entry => handedOff.has(entry.id)
+                        ? { ...entry, handedOff: true, handedOffAt: now } : entry)
+                };
+                try {
+                    item.clineHandoff = clineFrontend.writeHandoff(item.repo, updated);
+                    handoff = item.clineHandoff;
+                } catch (error) { log('[frontend] 记录 Cline 交接进度失败：' + error.message); }
+            }
         } else if (handoff) {
             vscode.window.showWarningMessage('已切回 Codex，但还没有绑定 Codex 会话；交接文件已保存，绑定后 Codex 可读取。');
         }
@@ -898,8 +926,14 @@ function activate(context) {
                                 if (payload.planId && payload.planId !== pending.id) {
                                     throw Object.assign(new Error('方案已更新，请重新确认'), { statusCode: 409 });
                                 }
-                                const worker = await loaded.startStageWithPlan(pending.plan, pending.request, pending.testCommand);
                                 loaded.pendingPlan = null;
+                                let worker;
+                                try {
+                                    worker = await loaded.startStageWithPlan(pending.plan, pending.request, pending.testCommand);
+                                } catch (error) {
+                                    if (!loaded.pendingPlan) loaded.pendingPlan = pending;
+                                    throw error;
+                                }
                                 return { stageId: worker.state.id, phase: worker.state.phase };
                             },
                             discard: async payload => {
@@ -986,6 +1020,7 @@ function activate(context) {
                                     : loaded.stageWorkers().find(candidate => candidate.state.phase === '待验收') || loaded.stageWorkers()[0];
                                 if (!worker) throw Object.assign(new Error('找不到阶段'), { statusCode: 404 });
                                 await worker.action('accept');
+                                showPreserved(worker);
                                 return { stageId: worker.state.id, phase: worker.state.phase };
                             },
                             cancel: async payload => {
@@ -1336,7 +1371,9 @@ function activate(context) {
                 await item.setPipelinePaused(false, message.text ? undefined : worker);
                 if (!message.text) return;
             }
-            return worker.action(message.action, message.text, message.task);
+            const result = await worker.action(message.action, message.text, message.task);
+            if (message.action === 'accept') showPreserved(worker);
+            return result;
         }
 
         const record = message.archive ? item.archive.find(entry => entry.id === message.archive) : item.stageWorker(message.run)?.state || item.state;

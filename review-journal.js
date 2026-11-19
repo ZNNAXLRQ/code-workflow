@@ -115,9 +115,16 @@ class ReviewJournal {
         const key = stageId + '\u0000' + taskId + '\u0000' + candidate;
         const record = this.data.results[key];
         if (!record) return null;
+        return record.review;
+    }
+
+    commit({ stageId, taskId, candidate }) {
+        this.load();
+        const key = stageId + '\u0000' + taskId + '\u0000' + candidate;
+        if (!this.data.results[key]) return false;
         delete this.data.results[key];
         this.save();
-        return record.review;
+        return true;
     }
 }
 
