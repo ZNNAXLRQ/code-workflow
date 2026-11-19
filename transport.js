@@ -241,11 +241,26 @@ class Outbox {
             attempts: 0,
             ...(meta ? { meta } : {})
         };
+        let existing = null;
         await this.withLock(async () => {
             await this.load();
+            if (meta?.handoffIds?.length) {
+                const wanted = new Set(meta.handoffIds);
+                existing = Object.values(this.entries).find(candidate =>
+                    candidate.kind === 'handoff' &&
+                    (candidate.meta?.handoffIds || []).some(requestId => wanted.has(requestId))) || null;
+            }
+            if (existing) return;
             this.entries[id] = entry;
             await this.save();
         });
+        if (existing) {
+            if (existing.status === 'acked') {
+                try { await this.notifyAck(existing); }
+                catch (error) { this.log('[outbox] 补记交接确认失败：' + error.message); }
+            }
+            return existing;
+        }
         try {
             await this.flush();
         } catch (error) {
@@ -256,8 +271,24 @@ class Outbox {
 
     async notifyAck(entry) {
         if (!this.onAck) return;
-        try { await this.onAck(entry); }
-        catch (error) { this.log('[outbox] ack 回调失败：' + error.message); }
+        if (entry.meta?.handoffAcked) return;
+        await this.onAck(entry);
+        if (entry.meta) {
+            entry.meta.handoffAcked = true;
+            await this.save();
+        }
+    }
+
+    async retryAcks() {
+        await this.withLock(async () => {
+            await this.load();
+            const entries = Object.values(this.entries).filter(entry => entry.status === 'acked' &&
+                entry.kind === 'handoff' && entry.meta?.handoffIds?.length && !entry.meta.handoffAcked);
+            for (const entry of entries) {
+                try { await this.notifyAck(entry); }
+                catch (error) { this.log('[outbox] 补记交接确认失败：' + error.message); }
+            }
+        });
     }
 
     async flush() {
@@ -319,9 +350,11 @@ class Outbox {
 
     start() {
         this.flush().catch(error => this.log('[outbox] 启动发送失败：' + error.message));
+        this.retryAcks().catch(error => this.log('[outbox] 启动补记失败：' + error.message));
         if (!this.timer) {
             this.timer = setInterval(() => {
                 this.flush().catch(error => this.log('[outbox] 定时发送失败：' + error.message));
+                this.retryAcks().catch(error => this.log('[outbox] 定时补记失败：' + error.message));
             }, this.intervalMs);
             this.timer.unref?.();
         }

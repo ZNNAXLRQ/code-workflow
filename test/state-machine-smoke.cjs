@@ -249,7 +249,7 @@ assert.ok(TRANSITIONS.steer.includes('联合验收中'));
 assert.ok(!TRANSITIONS.steer.includes('待验收'));
 assert.deepEqual(TRANSITIONS.retry, ['规划失败', '规划已中断', '待澄清', '待确认方案']);
 assert.deepEqual(TRANSITIONS.cancel, ['已暂停', '规划已中断', '规划失败', '待澄清', '待确认方案', '需处理']);
-assert.deepEqual(TRANSITIONS.accept, ['待验收']);
+assert.deepEqual(TRANSITIONS.accept, ['待验收', '待重新验证']);
 assert.deepEqual(TRANSITIONS.reject, ['待验收']);
 assert.deepEqual(TRANSITIONS.rollback, ['已暂停', '需处理']);
 assert.deepEqual(TRANSITIONS.answerTask, ['运行中', '需处理']);

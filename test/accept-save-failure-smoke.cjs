@@ -44,9 +44,10 @@ const config = () => ({ pipeline: true, maxParallel: '1', maxRepairs: 2, useClin
     assert.equal(await git(worker.state.stageTree, 'rev-parse', 'HEAD'), worker.state.stageHead);
 
     const originalSave = worker.save.bind(worker);
-    let failed = false;
+    let saveCalls = 0;
     worker.save = async () => {
-        if (!failed) { failed = true; throw new Error('simulated save failure'); }
+        saveCalls += 1;
+        if (saveCalls === 2) throw new Error('simulated save failure');
         return originalSave();
     };
     await assert.rejects(worker.action('accept'), /simulated save failure/);

@@ -751,23 +751,49 @@ class Workflow {
     }
 
     async acceptStage() {
+        const target = this.state.targetBranch;
+        if (!target) {
+            throw new Error('提交方案时没有锁定目标分支（当时处于 detached HEAD），无法验收合并。');
+        }
+        let containsAccepted = false;
+        if (this.state.acceptPending?.stageHead === this.state.stageHead) {
+            containsAccepted = await git(this.repo, 'merge-base', '--is-ancestor', this.state.stageHead, target)
+                .then(() => true, () => false);
+        }
+        if (this.state.acceptPending && containsAccepted) {
+            await this.finalizeAcceptance();
+            return;
+        }
+        if (this.state.phase === '待重新验证') await this.finishStage();
         if (this.state.phase !== '待验收') throw new Error('当前状态不支持验收');
         if (await git(this.state.stageTree, 'rev-parse', 'HEAD') !== this.state.stageHead) {
             throw new Error('待验收版本已变化');
         }
-        if (!this.state.targetBranch) {
-            throw new Error('提交方案时没有锁定目标分支（当时处于 detached HEAD），无法验收合并。');
+        if (this.state.stageReview?.candidate !== this.state.stageHead) {
+            throw new Error('缺少与当前候选提交一致的联合审查结论，不能验收。');
         }
-        const tip = (await git(this.repo, 'rev-parse', this.state.targetBranch)).trim();
+        const tip = (await git(this.repo, 'rev-parse', target)).trim();
         if (this.state.targetHead && tip !== this.state.targetHead) {
             await this.revalidateStage();
             if (this.state.phase !== '待验收') {
                 throw new Error('目标分支已更新，重新联合审查未通过，不能验收。');
             }
+            if (this.state.stageReview?.candidate !== this.state.stageHead) {
+                throw new Error('重新验证后缺少与当前候选提交一致的审查结论，不能验收。');
+            }
         }
-        await this.mergeStage(this.state.targetBranch);
+        this.state.acceptPending = {
+            target, stageHead: this.state.stageHead, startedAt: new Date().toISOString()
+        };
+        await this.save();
+        await this.mergeStage(target);
+        await this.finalizeAcceptance();
+    }
+
+    async finalizeAcceptance() {
         this.state.phase = '已验收';
         this.state.acceptedAt = new Date().toISOString();
+        delete this.state.acceptPending;
         this.archiveCurrent();
         if (this.pipelineOwner) this.owner.stages.delete(this.state.id);
         await this.save();
@@ -794,6 +820,7 @@ class Workflow {
         }
         this.state.stageHead = (await git(this.state.stageTree, 'rev-parse', 'HEAD')).trim();
         this.state.targetHead = tip;
+        this.state.phase = '待重新验证';
         delete this.state.stageReview;
         await this.save();
         await this.finishStage();
@@ -931,7 +958,7 @@ class Workflow {
                     delete task.fileRepairs;
                 }
             }
-        } else if (command === 'accept' && phase === '待验收') {
+        } else if (command === 'accept' && ['待验收', '待重新验证'].includes(phase)) {
             await this.acceptStage();
         } else if (command === 'reject' && phase === '待验收') {
             if (!feedback?.trim()) throw new Error('请先填写退回意见');

@@ -83,7 +83,7 @@ const TRANSITIONS = Object.freeze({
     retry: Object.freeze(['规划失败', '规划已中断', '待澄清', '待确认方案']),
     // canCancelStage(): 只有这些阶段允许取消整项任务
     cancel: Object.freeze(['已暂停', '规划已中断', '规划失败', '待澄清', '待确认方案', '需处理']),
-    accept: Object.freeze(['待验收']),
+    accept: Object.freeze(['待验收', '待重新验证']),
     reject: Object.freeze(['待验收']),
     // action(): rollback 仅允许已暂停、需处理
     rollback: Object.freeze(['已暂停', '需处理']),
@@ -164,6 +164,7 @@ function displayStatus(stage) {
     if (phase === '已取消') return null;
     if (phase === '已验收') return '已验收';
     if (phase === '待验收') return '待验收';
+    if (phase === '待重新验证') return '审查中';
     if (PLANNING_PHASES.has(phase)) return '规划中';
 
     if (phase === '联合验收中') {
