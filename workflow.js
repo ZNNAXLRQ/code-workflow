@@ -758,12 +758,46 @@ class Workflow {
         if (!this.state.targetBranch) {
             throw new Error('提交方案时没有锁定目标分支（当时处于 detached HEAD），无法验收合并。');
         }
+        const tip = (await git(this.repo, 'rev-parse', this.state.targetBranch)).trim();
+        if (this.state.targetHead && tip !== this.state.targetHead) {
+            await this.revalidateStage();
+            if (this.state.phase !== '待验收') {
+                throw new Error('目标分支已更新，重新联合审查未通过，不能验收。');
+            }
+        }
         await this.mergeStage(this.state.targetBranch);
-        await this.cleanupStage();
         this.state.phase = '已验收';
+        this.state.acceptedAt = new Date().toISOString();
         this.archiveCurrent();
         if (this.pipelineOwner) this.owner.stages.delete(this.state.id);
         await this.save();
+        await this.cleanupStage();
+        const archived = this.owner?.archive?.find(record => record.id === this.state.id);
+        if (archived) archived.preservedWorktrees = this.state.preservedWorktrees || [];
+        await this.save();
+    }
+
+    async revalidateStage() {
+        const target = this.state.targetBranch;
+        if (!target) throw new Error('没有锁定目标分支，无法更新基线。');
+        const tip = (await git(this.repo, 'rev-parse', target)).trim();
+        if (this.state.targetHead === tip) return false;
+        if (!this.state.stageTree) throw new Error('阶段工作树已不存在，无法更新目标基线。');
+        if ((await git(this.state.stageTree, 'status', '--porcelain')).trim()) {
+            throw new Error('阶段工作树有未提交改动，不能自动更新目标基线。');
+        }
+        try {
+            await git(this.state.stageTree, 'merge', '--no-ff', tip, '-m', 'merge: 更新目标分支基线');
+        } catch (error) {
+            await git(this.state.stageTree, 'merge', '--abort').catch(() => {});
+            throw new Error('目标分支无法自动合入阶段：' + error.message);
+        }
+        this.state.stageHead = (await git(this.state.stageTree, 'rev-parse', 'HEAD')).trim();
+        this.state.targetHead = tip;
+        delete this.state.stageReview;
+        await this.save();
+        await this.finishStage();
+        return true;
     }
 
     async planSingleFollowup(feedback, fromUser = false) {
@@ -1280,6 +1314,7 @@ class Workflow {
 
     async finishStage() {
         const controller = this.phaseController = new AbortController();
+        let reviewedCandidate = null;
         this.state.phase = '联合验收中';
         this.state.stageStep = '测试排队';
         await this.save();
@@ -1294,6 +1329,7 @@ class Workflow {
             controller.signal.throwIfAborted();
             this.state.stageTest = test;
             const sha = await git(where, 'rev-parse', 'HEAD');
+            reviewedCandidate = sha;
             if (await git(where, 'status', '--porcelain') || sha !== this.state.stageHead) throw new Error('阶段工作树或候选提交已变化');
             if (!test.passed && (!this.state.reviewBase || this.state.stageRepairs)) {
                 await this.stageRepair('阶段测试失败：' + test.detail);
@@ -1320,7 +1356,7 @@ class Workflow {
             if (review.verdict === 'changes_requested') {
                 const scoped = repairsByFile(review.findings, this.state.tasks.flatMap(task => task.paths));
                 await this.stageRepair(JSON.stringify(review.findings.filter(item => item.blocking)), scoped);
-                try { this.reviewJournal?.commit({ stageId: this.state.id, taskId: 'stage', candidate: sha }); }
+                try { this.reviewJournal?.commit({ stageId: this.state.id, taskId: 'stage', candidate: reviewedCandidate }); }
                 catch (error) { this.log('[review-journal] ' + error.message); }
                 return;
             }
@@ -1337,7 +1373,7 @@ class Workflow {
             this.schedule();
         }
         await this.save();
-        try { this.reviewJournal?.commit({ stageId: this.state.id, taskId: 'stage', candidate: sha }); }
+        try { this.reviewJournal?.commit({ stageId: this.state.id, taskId: 'stage', candidate: reviewedCandidate }); }
         catch (error) { this.log('[review-journal] ' + error.message); }
     }
 

@@ -21,11 +21,18 @@ class FakeBridge {
     const file = path.join(dir, 'outbox.json');
     const bridge = new FakeBridge();
     const outbox = new Outbox(file, bridge, { graceMs: 1000, checkTimeoutMs: 1000, log: () => {} });
+    const acks = [];
+    outbox.onAck = entry => acks.push(entry);
 
-    const entry = await outbox.enqueue('thread-smoke', 'Transport smoke ' + Date.now() + '.');
+    const entry = await outbox.enqueue('thread-smoke', 'Transport smoke ' + Date.now() + '.', {
+        kind: 'handoff', meta: { handoffIds: ['request-1'] }
+    });
+    assert.equal(entry.meta.handoffIds[0], 'request-1');
     assert.equal(entry.status, 'pending');
     assert.equal(await bridge.hasMarker('thread-smoke', entry.marker), true);
     assert.equal(outbox.entries[entry.id].status, 'acked');
+    assert.equal(acks.length, 1);
+    assert.equal(acks[0].meta.handoffIds[0], 'request-1');
     assert.equal(bridge.messages.length, 1);
     console.log('ENQUEUED_AND_ACKED', entry.id);
 

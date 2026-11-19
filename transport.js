@@ -188,6 +188,7 @@ class Outbox {
         this.again = false;
         this.timer = null;
         this.lock = Promise.resolve();
+        this.onAck = null;
     }
 
     async withLock(operation) {
@@ -227,7 +228,7 @@ class Outbox {
         return Object.values(this.entries).filter(entry => entry.status !== 'acked');
     }
 
-    async enqueue(threadId, text, { marker, kind = 'message' } = {}) {
+    async enqueue(threadId, text, { marker, kind = 'message', meta = null } = {}) {
         const id = randomUUID();
         marker = marker || `[wf:${id}]`;
         const entry = {
@@ -237,7 +238,8 @@ class Outbox {
             createdAt: new Date().toISOString(),
             sentAt: null,
             ackedAt: null,
-            attempts: 0
+            attempts: 0,
+            ...(meta ? { meta } : {})
         };
         await this.withLock(async () => {
             await this.load();
@@ -250,6 +252,12 @@ class Outbox {
             this.log('[outbox] 发送失败：' + error.message);
         }
         return entry;
+    }
+
+    async notifyAck(entry) {
+        if (!this.onAck) return;
+        try { await this.onAck(entry); }
+        catch (error) { this.log('[outbox] ack 回调失败：' + error.message); }
     }
 
     async flush() {
@@ -276,6 +284,7 @@ class Outbox {
                         entry.status = 'acked';
                         entry.ackedAt = new Date().toISOString();
                         await this.save();
+                        await this.notifyAck(entry);
                         continue;
                     }
                     const due = entry.status === 'pending' ||
@@ -295,6 +304,7 @@ class Outbox {
                         entry.status = 'acked';
                         entry.ackedAt = new Date().toISOString();
                         await this.save();
+                        await this.notifyAck(entry);
                     }
                 }
             });

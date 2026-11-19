@@ -559,6 +559,25 @@ function activate(context) {
             preserved.map(item => item.path).join('\n'));
     }
 
+    async function markClineHandedOff(item, ids) {
+        if (!ids || !ids.length) return;
+        let handoff;
+        try { handoff = clineFrontend.readHandoff(item.repo); } catch { return; }
+        if (!handoff) return;
+        const wanted = new Set(ids);
+        let changed = false;
+        const queue = (handoff.queue || []).map(entry => {
+            if (!wanted.has(entry.id) || entry.handedOff) return entry;
+            changed = true;
+            return { ...entry, handedOff: true, handedOffAt: new Date().toISOString() };
+        });
+        if (!changed) return;
+        try {
+            item.clineHandoff = clineFrontend.writeHandoff(item.repo, { ...handoff, queue });
+            await publish();
+        } catch (error) { channel.appendLine('[frontend] 记录 Cline 交接进度失败：' + error.message); }
+    }
+
     function stopClineWatch(item) {
         if (item.clineWatch) item.clineWatch();
         item.clineWatch = null;
@@ -633,7 +652,13 @@ function activate(context) {
         try { threadId = bindingStore.readBinding(item.repo)?.codexThreadId || threadId; } catch {}
         const queue = (handoff?.queue || []).map(entry => ({ ...entry,
             id: entry.id || 'req-' + randomUUID() }));
-        if (handoff) handoff = { ...handoff, queue };
+        if (handoff) {
+            handoff = { ...handoff, queue };
+            try {
+                item.clineHandoff = clineFrontend.writeHandoff(item.repo, handoff);
+                handoff = item.clineHandoff;
+            } catch (error) { log('[frontend] 持久化 Cline 请求 ID 失败：' + error.message); }
+        }
         const pending = queue.filter(entry => !entry.handedOff);
         if (threadId && handoff) {
             const message = [
@@ -644,24 +669,12 @@ function activate(context) {
                 '',
                 clineFrontend.handoffDigest({ ...handoff, queue: pending })
             ].join('\n');
-            const receipt = await item.outbox.enqueue(threadId, message, { kind: 'handoff' });
+            const receipt = await item.outbox.enqueue(threadId, message, {
+                kind: 'handoff', meta: { handoffIds: pending.map(entry => entry.id) }
+            });
             const delivered = item.outbox.entries[receipt.id]?.status === 'acked';
-            if (!delivered) log('[frontend] 交接消息尚未确认送达，queue 保持未交接状态');
-            const handedOff = new Set(delivered ? pending.map(entry => entry.id) : []);
-            if (handedOff.size) {
-                let latest = handoff;
-                try { latest = clineFrontend.readHandoff(item.repo) || handoff; } catch {}
-                const now = new Date().toISOString();
-                const updated = {
-                    ...latest,
-                    queue: (latest.queue || []).map(entry => handedOff.has(entry.id)
-                        ? { ...entry, handedOff: true, handedOffAt: now } : entry)
-                };
-                try {
-                    item.clineHandoff = clineFrontend.writeHandoff(item.repo, updated);
-                    handoff = item.clineHandoff;
-                } catch (error) { log('[frontend] 记录 Cline 交接进度失败：' + error.message); }
-            }
+            if (delivered) await markClineHandedOff(item, pending.map(entry => entry.id));
+            else log('[frontend] 交接消息尚未确认送达，queue 保持未交接状态');
         } else if (handoff) {
             vscode.window.showWarningMessage('已切回 Codex，但还没有绑定 Codex 会话；交接文件已保存，绑定后 Codex 可读取。');
         }
@@ -829,6 +842,11 @@ function activate(context) {
                 readTurns: threadId => readTurns({ command: config().codexExecutable, cwd: folder, threadId, limit: 10 })
             });
             const outbox = new Outbox(path.join(store, 'outbox.json'), hostBridge, { log });
+            outbox.onAck = entry => {
+                if (entry.kind === 'handoff' && entry.meta?.handoffIds?.length) {
+                    return markClineHandedOff(item, entry.meta.handoffIds);
+                }
+            };
             Object.assign(item, { codexSession: session, codexQuestions: questions, saveBinding, relay, hostBridge, outbox, reviewBroker });
             liveItems.add(item);
             let hub = null;
