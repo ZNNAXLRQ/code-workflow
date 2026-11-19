@@ -513,6 +513,8 @@ class Workflow {
                 await git(this.repo, 'commit', '-m', 'chore: 工作流初始提交');
             }
         }
+        const targetBranch = (await git(this.repo, 'rev-parse', '--abbrev-ref', 'HEAD')).trim();
+        const targetHead = (await git(this.repo, 'rev-parse', 'HEAD')).trim();
         let base = await git(this.repo, 'rev-parse', 'HEAD');
         const rootBase = base;
         const reviewSnapshot = entry?.reviewSnapshot || this.state.reviewSnapshot;
@@ -533,6 +535,7 @@ class Workflow {
         const messages = [{ role: 'user', text: request }];
         this.state = { id, phase: '规划中', request, test, authorize: entry?.authorize === true, submissionLogged: entry?.logged, reviewSnapshot,
             base, rootBase, stageHead: base, tasks: [], messages,
+            targetBranch: targetBranch === 'HEAD' ? null : targetBranch, targetHead,
             inbox: [], directory: path.join(this.store, id) };
         if (entry) this.owner.queue = this.owner.queue.filter(item => item.id !== entry.id);
         await fs.mkdir(this.state.directory);
@@ -675,6 +678,73 @@ class Workflow {
         }
     }
 
+    async mergeStage(target) {
+        const head = this.state.stageHead;
+        const message = `merge: 工作流阶段 ${this.state.id} 验收`;
+        const current = (await git(this.repo, 'rev-parse', '--abbrev-ref', 'HEAD')).trim();
+        if (current === target) {
+            if ((await git(this.repo, 'status', '--porcelain')).trim()) {
+                throw new Error('目标分支有未提交改动，无法合并；请先提交或清理工作区。');
+            }
+            try {
+                await git(this.repo, 'merge', '--no-ff', head, '-m', message);
+            } catch (error) {
+                await git(this.repo, 'merge', '--abort').catch(() => {});
+                throw error;
+            }
+            return;
+        }
+        const temporary = path.join(this.state.directory, 'accept');
+        try {
+            await git(this.repo, 'worktree', 'add', temporary, target);
+        } catch (error) {
+            throw new Error('无法在目标分支「' + target + '」上合并：' + error.message);
+        }
+        try {
+            if ((await git(temporary, 'status', '--porcelain')).trim()) {
+                throw new Error('目标分支工作树不干净，无法合并。');
+            }
+            try {
+                await git(temporary, 'merge', '--no-ff', head, '-m', message);
+            } catch (error) {
+                await git(temporary, 'merge', '--abort').catch(() => {});
+                throw error;
+            }
+        } finally {
+            await git(this.repo, 'worktree', 'remove', '--force', temporary).catch(() => {});
+        }
+    }
+
+    async cleanupStage() {
+        for (const task of this.state.tasks || []) {
+            if (!task.tree) continue;
+            await git(this.repo, 'worktree', 'remove', '--force', task.tree).catch(() => {});
+        }
+        if (this.state.stageTree) {
+            await git(this.repo, 'worktree', 'remove', '--force', this.state.stageTree).catch(() => {});
+        }
+        if (this.state.stageBranch) {
+            await git(this.repo, 'branch', '-D', this.state.stageBranch).catch(() => {});
+        }
+    }
+
+    async acceptStage() {
+        if (this.state.phase !== '待验收') throw new Error('当前状态不支持验收');
+        if (await git(this.state.stageTree, 'rev-parse', 'HEAD') !== this.state.stageHead) {
+            throw new Error('待验收版本已变化');
+        }
+        if (!this.state.targetBranch) {
+            throw new Error('提交方案时没有锁定目标分支（当时处于 detached HEAD），无法验收合并。');
+        }
+        await this.mergeStage(this.state.targetBranch);
+        this.state.phase = '已验收';
+        this.archiveCurrent();
+        if (this.pipelineOwner) this.owner.stages.delete(this.state.id);
+        await this.save();
+        try { await this.cleanupStage(); }
+        catch (error) { this.log('[cleanup] ' + error.message); }
+    }
+
     async planSingleFollowup(feedback, fromUser = false) {
         if (fromUser) this.recordStageMessage(feedback);
         const task = {
@@ -807,10 +877,7 @@ class Workflow {
                 }
             }
         } else if (command === 'accept' && phase === '待验收') {
-            if (await git(this.state.stageTree, 'rev-parse', 'HEAD') !== this.state.stageHead) throw new Error('待验收版本已变化');
-            this.state.phase = '已验收';
-            this.archiveCurrent();
-            if (this.pipelineOwner) this.owner.stages.delete(this.state.id);
+            await this.acceptStage();
         } else if (command === 'reject' && phase === '待验收') {
             if (!feedback?.trim()) throw new Error('请先填写退回意见');
             return await this.planSingleFollowup(feedback.trim(), true);

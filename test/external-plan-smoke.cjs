@@ -56,6 +56,13 @@ const { Workflow, git } = require('../workflow');
     }
     assert.equal(phase, '待验收', 'unexpected phase ' + phase);
     assert.equal(await git(worker.state.stageTree, 'show', 'HEAD:a.txt'), 'implemented by one');
+    const target = (await git(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).trim();
+    await git(repo, 'switch', '-c', 'verify-other');
+    await worker.action('accept');
+    assert.equal(await git(repo, 'show', target + ':a.txt'), 'implemented by one');
+    assert.equal(await fs.access(worker.state.stageTree).then(() => true, () => false), false);
+    await assert.rejects(git(repo, 'rev-parse', '--verify', worker.state.stageBranch));
+    console.log('accept merge checked');
     console.log('external plan smoke passed');
     await fs.rm(root, { recursive: true, force: true }).catch(() => {});
 })().catch(error => { console.error(error); process.exitCode = 1; });
