@@ -6,6 +6,7 @@ const prompts = require('./prompts');
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', NO_COLOR: '1' };
 const active = new Set(['准备中', '实现中', '测试中', '审查中', '集成中']);
+const activeAcceptTemps = new Set();
 const uriSafe = /^[a-z0-9][a-z0-9-]{0,35}$/;
 const maxCapture = 2 * 1024 * 1024;
 
@@ -688,6 +689,10 @@ class Workflow {
         const recorded = this.state.acceptTemp;
         if (!recorded) return true;
         const resolved = path.resolve(recorded);
+        if (activeAcceptTemps.has(resolved)) {
+            if (strict) throw new Error('另一个验收合并正在使用临时工作树，请稍后重试。');
+            return false;
+        }
         const store = path.resolve(this.store) + path.sep;
         if (!resolved.startsWith(store)) {
             delete this.state.acceptTemp;
@@ -712,6 +717,11 @@ class Workflow {
         catch (error) {
             if (strict) throw new Error('上次验收临时工作树有未提交改动，已保留：' + resolved);
             this.log('[accept] 保留未清理的验收临时工作树：' + resolved + '：' + error.message);
+            const preserved = Array.isArray(this.state.preservedWorktrees) ? this.state.preservedWorktrees : [];
+            if (!preserved.some(entry => entry.path === resolved)) {
+                this.state.preservedWorktrees = [...preserved, { path: resolved, reason: '验收临时工作树有未提交改动' }];
+                await this.save();
+            }
             return false;
         }
         delete this.state.acceptTemp;
@@ -744,9 +754,11 @@ class Workflow {
         const temporary = path.join(this.state.directory, 'accept-' + randomUUID().slice(0, 8));
         this.state.acceptTemp = temporary;
         await this.save();
+        activeAcceptTemps.add(temporary);
         try {
             await git(this.repo, 'worktree', 'add', temporary, target);
         } catch (error) {
+            activeAcceptTemps.delete(temporary);
             delete this.state.acceptTemp;
             await this.save();
             throw new Error('无法在目标分支「' + target + '」上合并：' + error.message);
@@ -762,6 +774,7 @@ class Workflow {
                 throw error;
             }
         } finally {
+            activeAcceptTemps.delete(temporary);
             try {
                 await git(this.repo, 'worktree', 'remove', temporary);
                 delete this.state.acceptTemp;
