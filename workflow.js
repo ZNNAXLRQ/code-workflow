@@ -172,8 +172,8 @@ function criteriaFor(tasks) {
 }
 
 class Workflow {
-    constructor({ repo, store, records = store, legacyStore = store, config, changed, log, adapter }) {
-        Object.assign(this, { repo, store, records, legacyStore, config, changed, log, adapter });
+    constructor({ repo, store, records = store, legacyStore = store, config, changed, log, adapter, reviewJournal = null }) {
+        Object.assign(this, { repo, store, records, legacyStore, config, changed, log, adapter, reviewJournal });
         this.jobs = new Map();
         this.controllers = new Map();
         this.lanes = new Map();
@@ -1063,7 +1063,7 @@ class Workflow {
             const cancel = () => reject(signal.reason);
             if (signal.aborted) return cancel();
             signal.addEventListener('abort', cancel, { once: true });
-            this.owner.reviewQueue.push({ id: randomUUID(), where, data, label, signal, onStart,
+            this.owner.reviewQueue.push({ id: randomUUID(), where, data, label, stageId: this.state.id, signal, onStart,
                 resolve: result => { signal.removeEventListener('abort', cancel); resolve(result); },
                 reject: error => { signal.removeEventListener('abort', cancel); reject(error); } });
             this.owner.scheduleReview();
@@ -1199,7 +1199,8 @@ class Workflow {
             const sha = task.candidate;
             const test = task.test;
             await this.status(task, '排队执行', '等待 Codex 审查槽');
-            const review = validateReview(await this.reviewSlot(task.tree, {
+            const recovered = this.reviewJournal?.take({ stageId: this.state.id, taskId: task.id, candidate: sha });
+            const review = validateReview(recovered || await this.reviewSlot(task.tree, {
                     title: task.title, requirements: task.requirements, clarification: task.feedback,
                     base: task.base, candidate: sha, criteria, test, testCoverage: task.testCoverage, previous: task.review
                 }, this.state.directory, task.id, signal, () => this.status(task, '审查中')), sha, criteria);
@@ -1278,7 +1279,8 @@ class Workflow {
             const criteria = criteriaFor(this.state.tasks);
             this.state.stageStep = '审查排队';
             await this.save();
-            const review = validateReview(await this.reviewSlot(where, {
+            const recovered = this.reviewJournal?.take({ stageId: this.state.id, taskId: 'stage', candidate: sha });
+            const review = validateReview(recovered || await this.reviewSlot(where, {
                 title: this.state.title, requirements: this.state.request, clarification: this.state.messages?.slice(1),
                 base: this.state.reviewBase || this.state.base, candidate: sha, criteria, test,
                 plannedTasks: this.state.tasks.map(task => ({ title: task.title, requirements: task.requirements,

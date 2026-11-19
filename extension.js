@@ -16,6 +16,7 @@ const projectSettings = require('./settings');
 const bindingStore = require('./binding');
 const clineCli = require('./cline-cli');
 const { createReviewBroker } = require('./review-broker');
+const { ReviewJournal } = require('./review-journal');
 const clineFrontend = require('./cline-frontend');
 
 const suggestedModel = 'mimo-v2.6:9b-q4_K_M';
@@ -212,10 +213,11 @@ async function reviewContext(where, data) {
 }
 
 function makeAdapter(_context, config, log, session, workspace, question, relay, broker) {
-    function brokerEntry(where, data, label, taskId) {
+    function brokerEntry(where, data, label, taskId, stageId) {
         return {
             id: randomUUID(),
             taskId: taskId || randomUUID(),
+            stageId,
             label: label || data?.title || 'stage',
             where,
             candidate: data?.candidate,
@@ -502,7 +504,8 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
                 if (entry.signal?.aborted) return;
                 try {
                     const review = await requestWithAbort(
-                        brokerEntry(entry.where, entry.data, entry.label, entry.id), entry.signal);
+                        brokerEntry(entry.where, entry.data, entry.label,
+                            (entry.stageId || '') + ':' + entry.label, entry.stageId), entry.signal);
                     results.set(entry.id, { review });
                 } catch (error) {
                     results.set(entry.id, { error });
@@ -760,8 +763,10 @@ function activate(context) {
                     publish().catch(() => {});
                 });
             }
+            const reviewJournal = new ReviewJournal(path.join(store, 'reviews.json'));
             const reviewBroker = createReviewBroker({
                 log,
+                journal: reviewJournal,
                 batchDelayMs: 1200,
                 timeoutMs: 7 * 24 * 60 * 60 * 1000,
                 send: async batch => {
@@ -789,7 +794,7 @@ function activate(context) {
                     await item.outbox.enqueue(threadId, message, { kind: 'review' });
                 }
             });
-            const item = new Workflow({ repo, store, records, legacyStore: sameRoot ? oldStore : records, config, log,
+            const item = new Workflow({ repo, store, records, legacyStore: sameRoot ? oldStore : records, config, log, reviewJournal,
                 changed: () => publish().catch(() => {}), adapter: makeAdapter(context, config, log, session, folder, question, relay, reviewBroker) });
             const hostBridge = new HostBridge({
                 log,
@@ -916,6 +921,15 @@ function activate(context) {
                                     const resolved = loaded.reviewBroker.resolve(payload.batchId, payload.entries);
                                     return { resolved };
                                 } catch (error) {
+                                    if (error.code === 'UNKNOWN_BATCH' && loaded.reviewJournal) {
+                                        try {
+                                            const recovered = loaded.reviewJournal.accept(payload.batchId, payload.entries);
+                                            return { recovered };
+                                        } catch (recovery) {
+                                            recovery.statusCode = 400;
+                                            throw recovery;
+                                        }
+                                    }
                                     error.statusCode = 400;
                                     throw error;
                                 }
@@ -945,9 +959,14 @@ function activate(context) {
                                 return { stageId: worker.state.id, taskId: payload.taskId };
                             },
                             status: async payload => hubStatus(loaded, payload.stageId),
-                            reviews: async () => ({
-                                batches: loaded.frontend === 'cline' ? [] : loaded.reviewBroker.openBatches()
-                            }),
+                            reviews: async () => {
+                                if (loaded.frontend === 'cline') return { batches: [] };
+                                const batches = loaded.reviewBroker.openBatches();
+                                const seen = new Set(batches.map(batch => batch.id));
+                                let journalBatches = [];
+                                try { journalBatches = loaded.reviewJournal.openBatches(); } catch {}
+                                return { batches: [...batches, ...journalBatches.filter(batch => !seen.has(batch.id))] };
+                            },
                             settings: async payload => {
                                 const globalDefaults = configuration(uri);
                                 if (!payload.patch) return projectSettings.readSettings(repo, { globalDefaults });

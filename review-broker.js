@@ -127,6 +127,7 @@ function validateResult(entry, result) {
  */
 function createReviewBroker({
     send,
+    journal = null,
     batchDelayMs = 1500,
     maxEntries = 8,
     maxChars = 120000,
@@ -352,6 +353,11 @@ function createReviewBroker({
         }, timeoutMs);
         try {
             await send({ id, entries: records.map(record => record.entry) });
+            try {
+                journal?.recordBatch({ id, entries: records.map(record => record.entry) });
+            } catch (error) {
+                log('审查批次写入磁盘失败：' + error.message);
+            }
         } catch (error) {
             if (state.settled) return id; // 已超时或被取消，不再重复计数
             const failure = error instanceof Error ? error : fail('SEND_FAILED', '审查发送失败：' + String(error));
@@ -388,6 +394,8 @@ function createReviewBroker({
             throw error;
         }
         closeBatch(state, 'resolved');
+        try { journal?.clearBatch(batchId); }
+        catch (error) { log('清理审查批次日志失败：' + error.message); }
         let count = 0;
         for (const { record, result } of items) {
             if (fulfill(record, result)) count++;

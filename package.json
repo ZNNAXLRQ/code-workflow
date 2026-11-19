@@ -30,5 +30,5 @@
       }
     }
   },
-  "files": ["extension.js", "workflow.js", "prompts.js", "panel.js", "status-panel.js", "codex-session.js", "transport.js", "state-machine.js", "hub.js", "settings.js", "binding.js", "cline-cli.js", "cline-frontend.js", "review-broker.js", "README.md", "media", "vendor"]
+  "files": ["extension.js", "workflow.js", "prompts.js", "panel.js", "status-panel.js", "codex-session.js", "transport.js", "state-machine.js", "hub.js", "settings.js", "binding.js", "cline-cli.js", "cline-frontend.js", "review-broker.js", "review-journal.js", "README.md", "media", "vendor"]
 }
