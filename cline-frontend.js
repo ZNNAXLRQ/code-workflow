@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 
 const VERSION = 1;
 const FRONTEND_VERSION = 1;
@@ -12,6 +12,57 @@ function handoffPath(repo) {
 
 function frontendPath(repo) {
     return path.join(path.resolve(repo), '.local-workflow', 'frontend.json');
+}
+
+function handoffStatePath(repo) {
+    return path.join(path.resolve(repo), '.local-workflow', 'cline-handoff-state.json');
+}
+
+function requestId(request) {
+    return 'req-' + createHash('sha256').update(String(request ?? '')).digest('hex').slice(0, 16);
+}
+
+function readHandoffState(repo) {
+    const file = handoffStatePath(repo);
+    try {
+        const parsed = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+        return {
+            version: 1,
+            requests: parsed && typeof parsed.requests === 'object' ? parsed.requests : {}
+        };
+    } catch (error) {
+        if (error.code === 'ENOENT') return { version: 1, requests: {} };
+        throw new Error('读取 Cline 交接状态失败：' + file + '：' + error.message);
+    }
+}
+
+function writeHandoffState(repo, value) {
+    const file = handoffStatePath(repo);
+    const normalized = {
+        version: 1,
+        requests: value && typeof value.requests === 'object' ? value.requests : {},
+        updatedAt: new Date().toISOString()
+    };
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const temporary = file + '.' + randomUUID() + '.tmp';
+    fs.writeFileSync(temporary, JSON.stringify(normalized, null, 2), 'utf8');
+    fs.renameSync(temporary, file);
+    return normalized;
+}
+
+function markHandoffRequests(repo, ids, at = new Date().toISOString()) {
+    if (!Array.isArray(ids) || !ids.length) return false;
+    const state = readHandoffState(repo);
+    let changed = false;
+    for (const id of ids) {
+        if (!id) continue;
+        const previous = state.requests[id] || {};
+        if (previous.handedOff) continue;
+        state.requests[id] = { ...previous, id, handedOff: true, handedOffAt: at };
+        changed = true;
+    }
+    if (changed) writeHandoffState(repo, state);
+    return changed;
 }
 
 function readFrontend(repo) {
@@ -169,6 +220,7 @@ function watchHandoff(repo, onChange, { intervalMs = 2000 } = {}) {
 }
 
 module.exports = {
-    VERSION, FRONTEND_VERSION, STATUSES, handoffPath, frontendPath, emptyHandoff, validateHandoff, readHandoff,
-    writeHandoff, readFrontend, writeFrontend, bootstrapPrompt, handoffDigest, watchHandoff
+    VERSION, FRONTEND_VERSION, STATUSES, handoffPath, frontendPath, handoffStatePath, requestId,
+    emptyHandoff, validateHandoff, readHandoff, writeHandoff, readFrontend, writeFrontend,
+    readHandoffState, writeHandoffState, markHandoffRequests, bootstrapPrompt, handoffDigest, watchHandoff
 };

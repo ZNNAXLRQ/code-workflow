@@ -561,23 +561,9 @@ function activate(context) {
 
     async function markClineHandedOff(item, ids) {
         if (!ids || !ids.length) return;
-        let handoff;
-        try { handoff = clineFrontend.readHandoff(item.repo); } catch { return; }
-        if (!handoff) return;
-        const wanted = new Set(ids);
-        let changed = false;
-        const queue = (handoff.queue || []).map(entry => {
-            if (!wanted.has(entry.id) || entry.handedOff) return entry;
-            changed = true;
-            return { ...entry, handedOff: true, handedOffAt: new Date().toISOString() };
-        });
+        const changed = clineFrontend.markHandoffRequests(item.repo, ids);
         if (!changed) return;
-        try {
-            item.clineHandoff = clineFrontend.writeHandoff(item.repo, { ...handoff, queue });
-        } catch (error) {
-            channel.appendLine('[frontend] 记录 Cline 交接进度失败：' + error.message);
-            throw error;
-        }
+        try { item.clineHandoffState = clineFrontend.readHandoffState(item.repo); } catch {}
         try { await publish(); }
         catch (error) { channel.appendLine('[frontend] 刷新 Cline 交接进度失败：' + error.message); }
     }
@@ -641,8 +627,6 @@ function activate(context) {
 
         stopClineWatch(item);
         let handoff = null;
-        try { handoff = clineFrontend.readHandoff(item.repo); }
-        catch (error) { vscode.window.showWarningMessage('Cline 交接文件无法读取，已切回 Codex：' + error.message); }
         clineFrontend.writeFrontend(item.repo, { mode: 'codex' });
         try {
             projectSettings.updateSettings(item.repo, { useClinePlan: false }, {
@@ -650,24 +634,26 @@ function activate(context) {
             });
         } catch (error) { log('[frontend] ' + error.message); }
         item.frontend = 'codex';
-        item.clineHandoff = handoff;
         item.reviewBroker?.cancelAll('切回 Codex 前端');
         let threadId = item.codexThreadId;
         try { threadId = bindingStore.readBinding(item.repo)?.codexThreadId || threadId; } catch {}
         await item.outbox.load();
+        try {
+            handoff = clineFrontend.readHandoff(item.repo);
+            item.clineHandoff = handoff;
+        } catch (error) {
+            vscode.window.showWarningMessage('Cline 交接文件无法读取，已切回 Codex：' + error.message);
+        }
+        let handoffState;
+        try { handoffState = clineFrontend.readHandoffState(item.repo); }
+        catch (error) { throw new Error('Cline 交接状态无法读取，未发送交接消息：' + error.message); }
         const queued = new Set(Object.values(item.outbox.entries)
             .filter(entry => entry.kind === 'handoff')
             .flatMap(entry => entry.meta?.handoffIds || []));
         const queue = (handoff?.queue || []).map(entry => ({ ...entry,
-            id: entry.id || 'req-' + randomUUID() }));
-        if (handoff) {
-            handoff = { ...handoff, queue };
-            try {
-                item.clineHandoff = clineFrontend.writeHandoff(item.repo, handoff);
-                handoff = item.clineHandoff;
-            } catch (error) { log('[frontend] 持久化 Cline 请求 ID 失败：' + error.message); }
-        }
-        const pending = queue.filter(entry => !entry.handedOff && !queued.has(entry.id));
+            id: entry.id || clineFrontend.requestId(entry.request) }));
+        const pending = queue.filter(entry => !entry.handedOff &&
+            !handoffState.requests[entry.id]?.handedOff && !queued.has(entry.id));
         if (threadId && handoff) {
             const message = [
                 '已从 Cline 前端切回 Codex。',

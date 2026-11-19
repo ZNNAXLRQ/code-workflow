@@ -7,6 +7,13 @@ const frontend = require('../cline-frontend');
 
 (async () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cline-frontend-'));
+    const stableId = frontend.requestId('同一条请求');
+    assert.equal(frontend.requestId('同一条请求'), stableId);
+    assert.notEqual(frontend.requestId('另一条请求'), stableId);
+    assert.deepEqual(frontend.readHandoffState(repo), { version: 1, requests: {} });
+    assert.equal(frontend.markHandoffRequests(repo, [stableId]), true);
+    assert.equal(frontend.readHandoffState(repo).requests[stableId].handedOff, true);
+    assert.equal(frontend.markHandoffRequests(repo, [stableId]), false);
     assert.deepEqual(frontend.readFrontend(repo), { version: 1, mode: 'codex', clineSessionId: null, updatedAt: null });
     const clineMode = frontend.writeFrontend(repo, { mode: 'cline', clineSessionId: 'cline:1' });
     assert.equal(clineMode.mode, 'cline');

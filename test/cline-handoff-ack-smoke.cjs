@@ -12,8 +12,7 @@ class DelayedBridge {
         return this.ack && this.messages.some(item => item.marker === marker);
     }
     async sendMessage(threadId, prompt) {
-        const marker = prompt.split('\n')[0];
-        this.messages.push({ threadId, marker });
+        this.messages.push({ threadId, marker: prompt.split('\n')[0] });
     }
     async waitForMarker() { return this.ack; }
     close() {}
@@ -23,38 +22,40 @@ class DelayedBridge {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cline-handoff-ack-'));
     const repo = path.join(dir, 'repo');
     await fs.mkdir(repo);
-    const handoff = frontend.emptyHandoff({ repo, request: '同步' });
-    handoff.queue = [{ request: '修复 A' }];
-    frontend.writeHandoff(repo, handoff);
-
-    const current = frontend.readHandoff(repo);
-    current.queue = current.queue.map((entry, index) => ({ ...entry, id: 'req-' + (index + 1) }));
-    frontend.writeHandoff(repo, current);
-    assert.equal(frontend.readHandoff(repo).queue[0].id, 'req-1');
+    const initial = frontend.emptyHandoff({ repo, request: '同步' });
+    initial.queue = [{ request: '修复 A' }];
+    frontend.writeHandoff(repo, initial);
+    const id = frontend.requestId('修复 A');
 
     const bridge = new DelayedBridge();
     const file = path.join(dir, 'outbox.json');
     const outbox = new Outbox(file, bridge, { graceMs: 0, checkTimeoutMs: 1000, log: () => {} });
     outbox.onAck = async entry => {
-        if (!entry.meta?.handoffIds?.length) return;
-        const latest = frontend.readHandoff(repo);
-        const wanted = new Set(entry.meta.handoffIds);
-        latest.queue = latest.queue.map(item => wanted.has(item.id)
-            ? { ...item, handedOff: true, handedOffAt: new Date().toISOString() } : item);
-        frontend.writeHandoff(repo, latest);
+        frontend.markHandoffRequests(repo, entry.meta?.handoffIds || []);
     };
     const receipt = await outbox.enqueue('thread', 'handoff queue', {
-        kind: 'handoff', meta: { handoffIds: ['req-1'] }
+        kind: 'handoff', meta: { handoffIds: [id] }
     });
     assert.equal(outbox.entries[receipt.id].status, 'sent');
-    assert.equal(frontend.readHandoff(repo).queue[0].handedOff, undefined);
+    assert.equal(frontend.readHandoffState(repo).requests[id], undefined);
+
+    // Cline 在等待期间追加了一条新请求；调度器没有整份写回交接文件。
+    const latest = frontend.readHandoff(repo);
+    latest.queue.push({ request: '修复 B' });
+    frontend.writeHandoff(repo, latest);
 
     bridge.ack = true;
     await outbox.flush();
     assert.equal(outbox.entries[receipt.id].status, 'acked');
-    const afterAck = frontend.readHandoff(repo);
-    assert.equal(afterAck.queue[0].handedOff, true);
-    assert.equal(afterAck.queue.filter(item => !item.handedOff).length, 0);
+    assert.equal(frontend.readHandoffState(repo).requests[id].handedOff, true);
+    const queue = frontend.readHandoff(repo).queue;
+    assert.deepEqual(queue.map(item => item.request), ['修复 A', '修复 B']);
+    assert.equal(queue[0].id, undefined, 'scheduler must not rewrite Cline handoff IDs');
+    const pending = queue.filter(item => {
+        const key = item.id || frontend.requestId(item.request);
+        return !frontend.readHandoffState(repo).requests[key]?.handedOff;
+    });
+    assert.deepEqual(pending.map(item => item.request), ['修复 B']);
 
     outbox.stop();
     await fs.rm(dir, { recursive: true, force: true });
