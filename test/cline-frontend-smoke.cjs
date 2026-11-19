@@ -10,21 +10,31 @@ const frontend = require('../cline-frontend');
     const stableId = frontend.requestId('同一条请求');
     assert.equal(frontend.requestId('同一条请求'), stableId);
     assert.notEqual(frontend.requestId('另一条请求'), stableId);
-    assert.deepEqual(frontend.readHandoffState(repo), { version: 1, requests: {} });
+    assert.deepEqual(frontend.readHandoffState(repo), { version: 1, assignments: {}, requests: {} });
     assert.equal(frontend.markHandoffRequests(repo, [stableId]), true);
     assert.equal(frontend.readHandoffState(repo).requests[stableId].handedOff, true);
     assert.equal(frontend.markHandoffRequests(repo, [stableId]), false);
+    const duplicate = frontend.emptyHandoff({ repo, request: '重复' });
+    duplicate.queue = [{ request: '跑一下项目测试' }, { request: '跑一下项目测试' }];
+    frontend.writeHandoff(repo, duplicate);
+    const resolved = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), { persist: true });
+    assert.equal(resolved.queue.length, 2);
+    assert.notEqual(resolved.queue[0].id, resolved.queue[1].id);
+    frontend.markHandoffRequests(repo, [resolved.queue[0].id]);
+    const resolvedAgain = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), { persist: true });
+    assert.equal(resolvedAgain.queue[0].handedOff, true);
+    assert.equal(resolvedAgain.queue[1].handedOff, false);
+    assert.equal(frontend.readHandoff(repo).queue[0].id, undefined);
     assert.deepEqual(frontend.readFrontend(repo), { version: 1, mode: 'codex', clineSessionId: null, updatedAt: null });
     const clineMode = frontend.writeFrontend(repo, { mode: 'cline', clineSessionId: 'cline:1' });
     assert.equal(clineMode.mode, 'cline');
     assert.equal(frontend.readFrontend(repo).clineSessionId, 'cline:1');
     frontend.writeFrontend(repo, { mode: 'codex' });
     assert.equal(frontend.readFrontend(repo).mode, 'codex');
-    assert.equal(frontend.readHandoff(repo), null);
+    assert.equal(frontend.readHandoff(repo).queue.length, 2);
     const empty = frontend.emptyHandoff({ repo, request: '实现登录' });
     assert.equal(empty.version, 1);
     assert.equal(empty.mode, 'cline');
-    assert.equal(frontend.readHandoff(repo), null);
 
     const written = frontend.writeHandoff(repo, {
         ...empty,

@@ -28,10 +28,11 @@ function readHandoffState(repo) {
         const parsed = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
         return {
             version: 1,
+            assignments: parsed && typeof parsed.assignments === 'object' ? parsed.assignments : {},
             requests: parsed && typeof parsed.requests === 'object' ? parsed.requests : {}
         };
     } catch (error) {
-        if (error.code === 'ENOENT') return { version: 1, requests: {} };
+        if (error.code === 'ENOENT') return { version: 1, assignments: {}, requests: {} };
         throw new Error('读取 Cline 交接状态失败：' + file + '：' + error.message);
     }
 }
@@ -40,6 +41,7 @@ function writeHandoffState(repo, value) {
     const file = handoffStatePath(repo);
     const normalized = {
         version: 1,
+        assignments: value && typeof value.assignments === 'object' ? value.assignments : {},
         requests: value && typeof value.requests === 'object' ? value.requests : {},
         updatedAt: new Date().toISOString()
     };
@@ -63,6 +65,34 @@ function markHandoffRequests(repo, ids, at = new Date().toISOString()) {
     }
     if (changed) writeHandoffState(repo, state);
     return changed;
+}
+
+function resolveHandoffQueue(repo, handoff, { persist = true } = {}) {
+    const state = readHandoffState(repo);
+    const seen = new Map();
+    let changed = false;
+    const queue = (handoff?.queue || []).map(entry => {
+        let id = entry.id;
+        if (!id) {
+            const fingerprint = requestId(entry.request);
+            const occurrence = (seen.get(fingerprint) || 0) + 1;
+            seen.set(fingerprint, occurrence);
+            const key = fingerprint + ':' + occurrence;
+            id = state.assignments[key];
+            if (!id) {
+                id = 'req-' + randomUUID();
+                state.assignments[key] = id;
+                changed = true;
+            }
+        }
+        return {
+            ...entry,
+            id,
+            handedOff: Boolean(entry.handedOff || state.requests[id]?.handedOff)
+        };
+    });
+    if (persist && changed) writeHandoffState(repo, state);
+    return { queue, state };
 }
 
 function readFrontend(repo) {
@@ -222,5 +252,5 @@ function watchHandoff(repo, onChange, { intervalMs = 2000 } = {}) {
 module.exports = {
     VERSION, FRONTEND_VERSION, STATUSES, handoffPath, frontendPath, handoffStatePath, requestId,
     emptyHandoff, validateHandoff, readHandoff, writeHandoff, readFrontend, writeFrontend,
-    readHandoffState, writeHandoffState, markHandoffRequests, bootstrapPrompt, handoffDigest, watchHandoff
+    readHandoffState, writeHandoffState, markHandoffRequests, resolveHandoffQueue, bootstrapPrompt, handoffDigest, watchHandoff
 };

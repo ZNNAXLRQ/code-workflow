@@ -627,6 +627,25 @@ function activate(context) {
 
         stopClineWatch(item);
         let handoff = null;
+        await item.outbox.load();
+        try { handoff = clineFrontend.readHandoff(item.repo); }
+        catch (error) {
+            startClineWatch(item);
+            throw new Error('Cline 交接文件读取失败，已保持 Cline 前端；修复后请重试：' + error.message);
+        }
+        let resolved;
+        try { resolved = clineFrontend.resolveHandoffQueue(item.repo, handoff, { persist: true }); }
+        catch (error) {
+            startClineWatch(item);
+            throw new Error('Cline 交接状态无法保存，已保持 Cline 前端；修复后请重试：' + error.message);
+        }
+        const queue = resolved.queue;
+        const queued = new Set(Object.values(item.outbox.entries)
+            .filter(entry => entry.kind === 'handoff')
+            .flatMap(entry => entry.meta?.handoffIds || []));
+        const pending = queue.filter(entry => !entry.handedOff && !queued.has(entry.id));
+        item.clineHandoff = { ...(handoff || {}), queue };
+
         clineFrontend.writeFrontend(item.repo, { mode: 'codex' });
         try {
             projectSettings.updateSettings(item.repo, { useClinePlan: false }, {
@@ -637,23 +656,6 @@ function activate(context) {
         item.reviewBroker?.cancelAll('切回 Codex 前端');
         let threadId = item.codexThreadId;
         try { threadId = bindingStore.readBinding(item.repo)?.codexThreadId || threadId; } catch {}
-        await item.outbox.load();
-        try {
-            handoff = clineFrontend.readHandoff(item.repo);
-            item.clineHandoff = handoff;
-        } catch (error) {
-            vscode.window.showWarningMessage('Cline 交接文件无法读取，已切回 Codex：' + error.message);
-        }
-        let handoffState;
-        try { handoffState = clineFrontend.readHandoffState(item.repo); }
-        catch (error) { throw new Error('Cline 交接状态无法读取，未发送交接消息：' + error.message); }
-        const queued = new Set(Object.values(item.outbox.entries)
-            .filter(entry => entry.kind === 'handoff')
-            .flatMap(entry => entry.meta?.handoffIds || []));
-        const queue = (handoff?.queue || []).map(entry => ({ ...entry,
-            id: entry.id || clineFrontend.requestId(entry.request) }));
-        const pending = queue.filter(entry => !entry.handedOff &&
-            !handoffState.requests[entry.id]?.handedOff && !queued.has(entry.id));
         if (threadId && handoff) {
             const message = [
                 '已从 Cline 前端切回 Codex。',
@@ -1137,12 +1139,19 @@ function activate(context) {
                 reviewRequest: Boolean(worker.state.reviewBase || historicalReviewRequest(worker.state.request || '')) }));
         const selected = stages.find(stage => stage.id === item?.selectedStage) || stages[0];
         if (frontend === 'cline') {
+            let clineView = cline;
+            if (cline && repo) {
+                try {
+                    const resolved = clineFrontend.resolveHandoffQueue(repo, cline, { persist: false });
+                    clineView = { ...cline, queue: resolved.queue.filter(entry => !entry.handedOff) };
+                } catch {}
+            }
             await view.webview.postMessage({
-                type: 'state', repo, folder: uri?.fsPath, frontend: 'cline', cline,
+                type: 'state', repo, folder: uri?.fsPath, frontend: 'cline', cline: clineView,
                 folders: folders().map(entry => ({ name: entry.name, path: entry.uri.fsPath })),
                 settings, refreshSettings, binding,
                 state: { id: cline?.stage?.id || 'cline', phase: 'Cline 前端', tasks: [] },
-                stages: [], pipelinePaused: false, queue: cline?.queue || [], conversation: [],
+                stages: [], pipelinePaused: false, queue: clineView?.queue || [], conversation: [],
                 codexThreadId: item?.codexThreadId || '', archive: []
             });
             return;
