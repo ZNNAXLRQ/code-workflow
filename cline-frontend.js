@@ -67,23 +67,32 @@ function markHandoffRequests(repo, ids, at = new Date().toISOString()) {
     return changed;
 }
 
-function resolveHandoffQueue(repo, handoff, { persist = true } = {}) {
+function resolveHandoffQueue(repo, handoff, { persist = true, writeIds = false } = {}) {
     const state = readHandoffState(repo);
     const seen = new Map();
-    let changed = false;
+    const legacyUsed = new Set();
+    let stateChanged = false;
+    let idsChanged = false;
     const queue = (handoff?.queue || []).map(entry => {
         let id = entry.id;
         if (!id) {
             const fingerprint = requestId(entry.request);
-            const occurrence = (seen.get(fingerprint) || 0) + 1;
-            seen.set(fingerprint, occurrence);
-            const key = fingerprint + ':' + occurrence;
-            id = state.assignments[key];
-            if (!id) {
-                id = 'req-' + randomUUID();
-                state.assignments[key] = id;
-                changed = true;
+            const legacyId = fingerprint;
+            if (state.requests[legacyId] && !legacyUsed.has(legacyId)) {
+                id = legacyId;
+                legacyUsed.add(legacyId);
+            } else {
+                const occurrence = (seen.get(fingerprint) || 0) + 1;
+                seen.set(fingerprint, occurrence);
+                const key = fingerprint + ':' + occurrence;
+                id = state.assignments[key];
+                if (!id) {
+                    id = 'req-' + randomUUID();
+                    state.assignments[key] = id;
+                    stateChanged = true;
+                }
             }
+            idsChanged = true;
         }
         return {
             ...entry,
@@ -91,7 +100,8 @@ function resolveHandoffQueue(repo, handoff, { persist = true } = {}) {
             handedOff: Boolean(entry.handedOff || state.requests[id]?.handedOff)
         };
     });
-    if (persist && changed) writeHandoffState(repo, state);
+    if (persist && stateChanged) writeHandoffState(repo, state);
+    if (writeIds && idsChanged) writeHandoff(repo, { ...handoff, queue });
     return { queue, state };
 }
 

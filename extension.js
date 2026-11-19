@@ -634,8 +634,9 @@ function activate(context) {
             throw new Error('Cline 交接文件读取失败，已保持 Cline 前端；修复后请重试：' + error.message);
         }
         let resolved;
-        try { resolved = clineFrontend.resolveHandoffQueue(item.repo, handoff, { persist: true }); }
-        catch (error) {
+        try {
+            resolved = clineFrontend.resolveHandoffQueue(item.repo, handoff, { persist: true, writeIds: true });
+        } catch (error) {
             startClineWatch(item);
             throw new Error('Cline 交接状态无法保存，已保持 Cline 前端；修复后请重试：' + error.message);
         }
@@ -645,17 +646,9 @@ function activate(context) {
             .flatMap(entry => entry.meta?.handoffIds || []));
         const pending = queue.filter(entry => !entry.handedOff && !queued.has(entry.id));
         item.clineHandoff = { ...(handoff || {}), queue };
-
-        clineFrontend.writeFrontend(item.repo, { mode: 'codex' });
-        try {
-            projectSettings.updateSettings(item.repo, { useClinePlan: false }, {
-                scope: 'folder', globalDefaults: configuration(vscode.Uri.file(item.repo))
-            });
-        } catch (error) { log('[frontend] ' + error.message); }
-        item.frontend = 'codex';
-        item.reviewBroker?.cancelAll('切回 Codex 前端');
         let threadId = item.codexThreadId;
         try { threadId = bindingStore.readBinding(item.repo)?.codexThreadId || threadId; } catch {}
+        let receipt = null;
         if (threadId && handoff) {
             const message = [
                 '已从 Cline 前端切回 Codex。',
@@ -665,9 +658,28 @@ function activate(context) {
                 '',
                 clineFrontend.handoffDigest({ ...handoff, queue: pending })
             ].join('\n');
-            const receipt = await item.outbox.enqueue(threadId, message, {
-                kind: 'handoff', meta: { handoffIds: pending.map(entry => entry.id) }
+            try {
+                receipt = await item.outbox.enqueue(threadId, message, {
+                    kind: 'handoff', meta: { handoffIds: pending.map(entry => entry.id) }
+                });
+            } catch (error) {
+                startClineWatch(item);
+                throw new Error('交接消息写入发件箱失败，已保持 Cline 前端；修复后请重试：' + error.message);
+            }
+        }
+        try { clineFrontend.writeFrontend(item.repo, { mode: 'codex' }); }
+        catch (error) {
+            startClineWatch(item);
+            throw new Error('前端模式保存失败，已保持 Cline 前端：' + error.message);
+        }
+        try {
+            projectSettings.updateSettings(item.repo, { useClinePlan: false }, {
+                scope: 'folder', globalDefaults: configuration(vscode.Uri.file(item.repo))
             });
+        } catch (error) { log('[frontend] ' + error.message); }
+        item.frontend = 'codex';
+        item.reviewBroker?.cancelAll('切回 Codex 前端');
+        if (receipt) {
             const delivered = item.outbox.entries[receipt.id]?.status === 'acked';
             if (delivered) await markClineHandedOff(item, receipt.meta?.handoffIds || []);
             else log('[frontend] 交接消息尚未确认送达，queue 保持未交接状态');

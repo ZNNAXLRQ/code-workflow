@@ -25,7 +25,10 @@ class DelayedBridge {
     const initial = frontend.emptyHandoff({ repo, request: '同步' });
     initial.queue = [{ request: '修复 A' }];
     frontend.writeHandoff(repo, initial);
-    const id = frontend.requestId('修复 A');
+    const id = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), {
+        persist: true, writeIds: true
+    }).queue[0].id;
+    assert.equal(frontend.readHandoff(repo).queue[0].id, id);
 
     const bridge = new DelayedBridge();
     const file = path.join(dir, 'outbox.json');
@@ -50,7 +53,7 @@ class DelayedBridge {
     assert.equal(frontend.readHandoffState(repo).requests[id].handedOff, true);
     const queue = frontend.readHandoff(repo).queue;
     assert.deepEqual(queue.map(item => item.request), ['修复 A', '修复 B']);
-    assert.equal(queue[0].id, undefined, 'scheduler must not rewrite Cline handoff IDs');
+    assert.equal(queue[0].id, id, 'scheduler should persist a stable request id');
     const pending = queue.filter(item => {
         const key = item.id || frontend.requestId(item.request);
         return !frontend.readHandoffState(repo).requests[key]?.handedOff;

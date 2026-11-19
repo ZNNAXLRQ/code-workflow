@@ -17,21 +17,45 @@ const frontend = require('../cline-frontend');
     const duplicate = frontend.emptyHandoff({ repo, request: '重复' });
     duplicate.queue = [{ request: '跑一下项目测试' }, { request: '跑一下项目测试' }];
     frontend.writeHandoff(repo, duplicate);
-    const resolved = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), { persist: true });
+    const resolved = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), {
+        persist: true, writeIds: true
+    });
     assert.equal(resolved.queue.length, 2);
     assert.notEqual(resolved.queue[0].id, resolved.queue[1].id);
-    frontend.markHandoffRequests(repo, [resolved.queue[0].id]);
-    const resolvedAgain = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), { persist: true });
-    assert.equal(resolvedAgain.queue[0].handedOff, true);
-    assert.equal(resolvedAgain.queue[1].handedOff, false);
-    assert.equal(frontend.readHandoff(repo).queue[0].id, undefined);
+    const firstId = resolved.queue[0].id;
+    const secondId = resolved.queue[1].id;
+    assert.equal(frontend.readHandoff(repo).queue[0].id, firstId);
+    frontend.markHandoffRequests(repo, [firstId]);
+    const latest = frontend.readHandoff(repo);
+    frontend.writeHandoff(repo, { ...latest, queue: [latest.queue[1]] });
+    const resolvedAgain = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), {
+        persist: true, writeIds: true
+    });
+    assert.equal(resolvedAgain.queue.length, 1);
+    assert.equal(resolvedAgain.queue[0].id, secondId);
+    assert.equal(resolvedAgain.queue[0].handedOff, false);
+
+    const legacyText = '旧版已交接';
+    const legacyId = frontend.requestId(legacyText);
+    frontend.writeHandoffState(repo, {
+        version: 1, assignments: {},
+        requests: { [legacyId]: { id: legacyId, handedOff: true, handedOffAt: new Date().toISOString() } }
+    });
+    const legacy = frontend.emptyHandoff({ repo, request: legacyText });
+    legacy.queue = [{ request: legacyText }];
+    frontend.writeHandoff(repo, legacy);
+    const migrated = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), {
+        persist: true, writeIds: true
+    });
+    assert.equal(migrated.queue[0].id, legacyId);
+    assert.equal(migrated.queue[0].handedOff, true);
     assert.deepEqual(frontend.readFrontend(repo), { version: 1, mode: 'codex', clineSessionId: null, updatedAt: null });
     const clineMode = frontend.writeFrontend(repo, { mode: 'cline', clineSessionId: 'cline:1' });
     assert.equal(clineMode.mode, 'cline');
     assert.equal(frontend.readFrontend(repo).clineSessionId, 'cline:1');
     frontend.writeFrontend(repo, { mode: 'codex' });
     assert.equal(frontend.readFrontend(repo).mode, 'codex');
-    assert.equal(frontend.readHandoff(repo).queue.length, 2);
+    assert.equal(frontend.readHandoff(repo).queue.length, 1);
     const empty = frontend.emptyHandoff({ repo, request: '实现登录' });
     assert.equal(empty.version, 1);
     assert.equal(empty.mode, 'cline');
