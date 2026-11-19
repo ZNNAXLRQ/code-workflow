@@ -82,7 +82,7 @@ function resolveHandoffQueue(repo, handoff, { knownIds = new Set() } = {}) {
                 legacyUsed.add(legacyId);
             } else {
                 const assigned = state.assignments[legacyId + ':' + occurrence];
-                if (!assigned) {
+                if (!assigned || state.requests[assigned]?.handedOff) {
                     throw new Error('Cline 请求缺少唯一 id；请让 Cline 为 queue 项写入稳定的 id（UUID）。');
                 }
                 id = assigned;
