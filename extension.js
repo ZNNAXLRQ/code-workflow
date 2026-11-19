@@ -606,6 +606,12 @@ function activate(context) {
                 throw new Error('当前 Cline 扩展没有 startNewTask 接口，无法创建前端会话。');
             }
             const sessionId = 'cline:' + Date.now();
+            item.frontend = 'cline';
+            try { await item.outbox.holdAllHandoff(); }
+            catch (error) {
+                item.frontend = 'codex';
+                throw new Error('无法暂存待发送交接，未切换到 Cline 前端：' + error.message);
+            }
             await api.startNewTask(clineFrontend.bootstrapPrompt({
                 repo: item.repo, request: handoff.request || item.state.request || ''
             }));

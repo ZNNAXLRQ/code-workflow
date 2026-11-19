@@ -51,6 +51,11 @@ function git(cwd, ...args) {
     assert.equal(fs.existsSync(path.join(unrecorded, 'keep-unrecorded.txt')), true);
     assert.equal(workflow.state.acceptTemp, recorded);
 
+    const cleaned = await workflow.pruneAcceptWorktrees({ strict: false });
+    assert.equal(cleaned, false);
+    assert.equal(fs.existsSync(path.join(recorded, 'keep-recorded.txt')), true);
+    assert.equal((workflow.state.preservedWorktrees || []).some(entry => entry.path === recorded), true);
+
     await git(repo, 'worktree', 'remove', '--force', recorded);
     await git(repo, 'worktree', 'remove', '--force', unrecorded);
     fs.rmSync(dir, { recursive: true, force: true });
