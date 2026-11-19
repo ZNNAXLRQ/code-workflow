@@ -228,13 +228,13 @@ class Outbox {
         return Object.values(this.entries).filter(entry => entry.status !== 'acked');
     }
 
-    async enqueue(threadId, text, { marker, kind = 'message', meta = null } = {}) {
+    async enqueue(threadId, text, { marker, kind = 'message', meta = null, hold = false } = {}) {
         const id = randomUUID();
         marker = marker || `[wf:${id}]`;
         const entry = {
             id, kind, threadId, marker,
             prompt: marker + '\n' + text,
-            status: 'pending',
+            status: hold ? 'held' : 'pending',
             createdAt: new Date().toISOString(),
             sentAt: null,
             ackedAt: null,
@@ -263,12 +263,28 @@ class Outbox {
             }
             return existing;
         }
+        if (hold) return entry;
         try {
             await this.flush();
         } catch (error) {
             this.log('[outbox] 发送失败：' + error.message);
         }
         return entry;
+    }
+
+    async releaseHeld() {
+        await this.withLock(async () => {
+            await this.load();
+            let changed = false;
+            for (const entry of Object.values(this.entries)) {
+                if (entry.status !== 'held') continue;
+                entry.status = 'pending';
+                changed = true;
+            }
+            if (changed) await this.save();
+        });
+        try { await this.flush(); }
+        catch (error) { this.log('[outbox] 释放待发送消息失败：' + error.message); }
     }
 
     async notifyAck(entry) {
@@ -305,7 +321,7 @@ class Outbox {
                 const entries = this.pending().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
                 if (!entries.length) return;
                 for (const entry of entries) {
-                    if (entry.status === 'acked') continue;
+                    if (entry.status === 'acked' || entry.status === 'held') continue;
                     let found;
                     try {
                         found = await this.bridge.hasMarker(entry.threadId, entry.marker);

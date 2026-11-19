@@ -634,16 +634,17 @@ function activate(context) {
             throw new Error('Cline 交接文件读取失败，已保持 Cline 前端；修复后请重试：' + error.message);
         }
         let resolved;
-        try {
-            resolved = clineFrontend.resolveHandoffQueue(item.repo, handoff, { persist: true, writeIds: true });
-        } catch (error) {
-            startClineWatch(item);
-            throw new Error('Cline 交接状态无法保存，已保持 Cline 前端；修复后请重试：' + error.message);
-        }
-        const queue = resolved.queue;
-        const queued = new Set(Object.values(item.outbox.entries)
+        const knownIds = new Set(Object.values(item.outbox.entries)
             .filter(entry => entry.kind === 'handoff')
             .flatMap(entry => entry.meta?.handoffIds || []));
+        try {
+            resolved = clineFrontend.resolveHandoffQueue(item.repo, handoff, { knownIds });
+        } catch (error) {
+            startClineWatch(item);
+            throw new Error('Cline 交接请求缺少稳定 ID，已保持 Cline 前端；请让 Cline 为 queue 项补 id 后重试：' + error.message);
+        }
+        const queue = resolved.queue;
+        const queued = new Set(knownIds);
         const pending = queue.filter(entry => !entry.handedOff && !queued.has(entry.id));
         item.clineHandoff = { ...(handoff || {}), queue };
         let threadId = item.codexThreadId;
@@ -660,7 +661,7 @@ function activate(context) {
             ].join('\n');
             try {
                 receipt = await item.outbox.enqueue(threadId, message, {
-                    kind: 'handoff', meta: { handoffIds: pending.map(entry => entry.id) }
+                    kind: 'handoff', hold: true, meta: { handoffIds: pending.map(entry => entry.id) }
                 });
             } catch (error) {
                 startClineWatch(item);
@@ -679,6 +680,7 @@ function activate(context) {
         } catch (error) { log('[frontend] ' + error.message); }
         item.frontend = 'codex';
         item.reviewBroker?.cancelAll('切回 Codex 前端');
+        await item.outbox.releaseHeld();
         if (receipt) {
             const delivered = item.outbox.entries[receipt.id]?.status === 'acked';
             if (delivered) await markClineHandedOff(item, receipt.meta?.handoffIds || []);
@@ -879,6 +881,9 @@ function activate(context) {
                 loaded.frontend = frontend.mode;
                 loaded.clineSessionId = frontend.clineSessionId;
                 loaded.outbox.start();
+                if (frontend.mode === 'codex') {
+                    loaded.outbox.releaseHeld().catch(error => log('[outbox] 恢复待发送交接失败：' + error.message));
+                }
                 if (frontend.mode === 'cline') {
                     startClineWatch(loaded);
                 } else {
@@ -1154,7 +1159,10 @@ function activate(context) {
             let clineView = cline;
             if (cline && repo) {
                 try {
-                    const resolved = clineFrontend.resolveHandoffQueue(repo, cline, { persist: false });
+                    const knownIds = new Set(Object.values(item?.outbox?.entries || {})
+                        .filter(entry => entry.kind === 'handoff')
+                        .flatMap(entry => entry.meta?.handoffIds || []));
+                    const resolved = clineFrontend.resolveHandoffQueue(repo, cline, { knownIds });
                     clineView = { ...cline, queue: resolved.queue.filter(entry => !entry.handedOff) };
                 } catch {}
             }

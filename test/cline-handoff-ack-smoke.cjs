@@ -23,11 +23,9 @@ class DelayedBridge {
     const repo = path.join(dir, 'repo');
     await fs.mkdir(repo);
     const initial = frontend.emptyHandoff({ repo, request: '同步' });
-    initial.queue = [{ request: '修复 A' }];
+    initial.queue = [{ id: 'request-a', request: '修复 A' }];
     frontend.writeHandoff(repo, initial);
-    const id = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), {
-        persist: true, writeIds: true
-    }).queue[0].id;
+    const id = 'request-a';
     assert.equal(frontend.readHandoff(repo).queue[0].id, id);
 
     const bridge = new DelayedBridge();
@@ -44,7 +42,7 @@ class DelayedBridge {
 
     // Cline 在等待期间追加了一条新请求；调度器没有整份写回交接文件。
     const latest = frontend.readHandoff(repo);
-    latest.queue.push({ request: '修复 B' });
+    latest.queue.push({ id: 'request-b', request: '修复 B' });
     frontend.writeHandoff(repo, latest);
 
     bridge.ack = true;

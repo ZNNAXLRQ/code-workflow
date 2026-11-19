@@ -67,32 +67,19 @@ function markHandoffRequests(repo, ids, at = new Date().toISOString()) {
     return changed;
 }
 
-function resolveHandoffQueue(repo, handoff, { persist = true, writeIds = false } = {}) {
+function resolveHandoffQueue(repo, handoff, { knownIds = new Set() } = {}) {
     const state = readHandoffState(repo);
-    const seen = new Map();
     const legacyUsed = new Set();
-    let stateChanged = false;
-    let idsChanged = false;
     const queue = (handoff?.queue || []).map(entry => {
         let id = entry.id;
         if (!id) {
-            const fingerprint = requestId(entry.request);
-            const legacyId = fingerprint;
-            if (state.requests[legacyId] && !legacyUsed.has(legacyId)) {
+            const legacyId = requestId(entry.request);
+            if ((state.requests[legacyId] || knownIds.has(legacyId)) && !legacyUsed.has(legacyId)) {
                 id = legacyId;
                 legacyUsed.add(legacyId);
             } else {
-                const occurrence = (seen.get(fingerprint) || 0) + 1;
-                seen.set(fingerprint, occurrence);
-                const key = fingerprint + ':' + occurrence;
-                id = state.assignments[key];
-                if (!id) {
-                    id = 'req-' + randomUUID();
-                    state.assignments[key] = id;
-                    stateChanged = true;
-                }
+                throw new Error('Cline 请求缺少唯一 id；请让 Cline 为 queue 项写入稳定的 id（UUID）。');
             }
-            idsChanged = true;
         }
         return {
             ...entry,
@@ -100,8 +87,6 @@ function resolveHandoffQueue(repo, handoff, { persist = true, writeIds = false }
             handedOff: Boolean(entry.handedOff || state.requests[id]?.handedOff)
         };
     });
-    if (persist && stateChanged) writeHandoffState(repo, state);
-    if (writeIds && idsChanged) writeHandoff(repo, { ...handoff, queue });
     return { queue, state };
 }
 
@@ -210,7 +195,7 @@ function bootstrapPrompt({ repo, request, handoff = handoffPath(repo) }) {
         '规则：',
         '1. 计划变化时更新 plan；拆分出的任务写入 tasks（id/title/status/paths/notes），status 用 todo/doing/done/blocked。',
         '2. 每次实现后更新 implemented（taskId/files/tests/note），并把任务状态改为 done；不要重复实现已完成任务。',
-        '3. 等待下一个请求时写入 queue；不要执行 queue 里的请求，除非用户在当前会话明确要求。',
+        '3. 等待下一个请求时写入 queue；**queue 每项必须有唯一 id（UUID）**，在加入时生成，之后不要改变。不要执行 queue 里的请求，除非用户在当前会话明确要求。',
         '4. 每次更新后保持 JSON 合法；不要删除 version/mode/repo 字段。',
         '5. 不要修改本交接文件之外的、与当前任务无关的项目文件。'
     ].filter(Boolean).join('\n');

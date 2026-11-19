@@ -15,25 +15,23 @@ const frontend = require('../cline-frontend');
     assert.equal(frontend.readHandoffState(repo).requests[stableId].handedOff, true);
     assert.equal(frontend.markHandoffRequests(repo, [stableId]), false);
     const duplicate = frontend.emptyHandoff({ repo, request: '重复' });
-    duplicate.queue = [{ request: '跑一下项目测试' }, { request: '跑一下项目测试' }];
+    duplicate.queue = [
+        { id: 'request-a', request: '跑一下项目测试' },
+        { id: 'request-b', request: '跑一下项目测试' }
+    ];
     frontend.writeHandoff(repo, duplicate);
-    const resolved = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), {
-        persist: true, writeIds: true
-    });
-    assert.equal(resolved.queue.length, 2);
-    assert.notEqual(resolved.queue[0].id, resolved.queue[1].id);
-    const firstId = resolved.queue[0].id;
-    const secondId = resolved.queue[1].id;
-    assert.equal(frontend.readHandoff(repo).queue[0].id, firstId);
-    frontend.markHandoffRequests(repo, [firstId]);
+    const resolved = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo));
+    assert.deepEqual(resolved.queue.map(entry => entry.id), ['request-a', 'request-b']);
+    frontend.markHandoffRequests(repo, ['request-a']);
     const latest = frontend.readHandoff(repo);
     frontend.writeHandoff(repo, { ...latest, queue: [latest.queue[1]] });
-    const resolvedAgain = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), {
-        persist: true, writeIds: true
-    });
+    const resolvedAgain = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo));
     assert.equal(resolvedAgain.queue.length, 1);
-    assert.equal(resolvedAgain.queue[0].id, secondId);
+    assert.equal(resolvedAgain.queue[0].id, 'request-b');
     assert.equal(resolvedAgain.queue[0].handedOff, false);
+    assert.throws(() => frontend.resolveHandoffQueue(repo, {
+        queue: [{ request: '没有 id 的请求' }]
+    }), /唯一 id/);
 
     const legacyText = '旧版已交接';
     const legacyId = frontend.requestId(legacyText);
@@ -44,11 +42,20 @@ const frontend = require('../cline-frontend');
     const legacy = frontend.emptyHandoff({ repo, request: legacyText });
     legacy.queue = [{ request: legacyText }];
     frontend.writeHandoff(repo, legacy);
-    const migrated = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), {
-        persist: true, writeIds: true
-    });
+    const migrated = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo));
     assert.equal(migrated.queue[0].id, legacyId);
     assert.equal(migrated.queue[0].handedOff, true);
+
+    frontend.writeHandoffState(repo, { version: 1, assignments: {}, requests: {} });
+    const outboxOnlyText = '仅旧发件箱';
+    const outboxOnlyId = frontend.requestId(outboxOnlyText);
+    const outboxOnly = frontend.emptyHandoff({ repo, request: outboxOnlyText });
+    outboxOnly.queue = [{ request: outboxOnlyText }];
+    frontend.writeHandoff(repo, outboxOnly);
+    const migratedOutbox = frontend.resolveHandoffQueue(repo, frontend.readHandoff(repo), {
+        knownIds: new Set([outboxOnlyId])
+    });
+    assert.equal(migratedOutbox.queue[0].id, outboxOnlyId);
     assert.deepEqual(frontend.readFrontend(repo), { version: 1, mode: 'codex', clineSessionId: null, updatedAt: null });
     const clineMode = frontend.writeFrontend(repo, { mode: 'cline', clineSessionId: 'cline:1' });
     assert.equal(clineMode.mode, 'cline');

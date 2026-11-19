@@ -36,6 +36,16 @@ class FakeBridge {
     assert.equal(bridge.messages.length, 1);
     console.log('ENQUEUED_AND_ACKED', entry.id);
 
+    const held = await outbox.enqueue('thread-smoke', 'Held handoff', {
+        kind: 'handoff', hold: true, meta: { handoffIds: ['held-1'] }
+    });
+    assert.equal(outbox.entries[held.id].status, 'held');
+    assert.equal(bridge.messages.length, 1, 'held message must not be sent before release');
+    await outbox.releaseHeld();
+    assert.equal(outbox.entries[held.id].status, 'acked');
+    assert.equal(bridge.messages.length, 2);
+    console.log('HOLD_RELEASED', held.id);
+
     const reload = new Outbox(file, bridge, { graceMs: 1000, checkTimeoutMs: 1000, log: () => {} });
     await reload.load();
     assert.equal(reload.pending().length, 0);
