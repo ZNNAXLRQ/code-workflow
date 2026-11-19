@@ -862,6 +862,7 @@ function activate(context) {
                 readTurns: threadId => readTurns({ command: config().codexExecutable, cwd: folder, threadId, limit: 10 })
             });
             const outbox = new Outbox(path.join(store, 'outbox.json'), hostBridge, { log });
+            outbox.canSend = entry => entry.kind !== 'handoff' || item.frontend === 'codex';
             outbox.onAck = entry => {
                 if (entry.kind === 'handoff' && entry.meta?.handoffIds?.length) {
                     return markClineHandedOff(item, entry.meta.handoffIds);

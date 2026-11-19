@@ -63,6 +63,22 @@ class FakeBridge {
     assert.equal(bridge.messages.length, 3);
     console.log('OLD_PENDING_HELD');
 
+    let allowHandoff = false;
+    outbox.canSend = entry => entry.kind !== 'handoff' || allowHandoff;
+    const blocked = await outbox.enqueue('thread-smoke', 'blocked handoff', { kind: 'handoff' });
+    assert.equal(outbox.entries[blocked.id].status, 'pending');
+    assert.equal(bridge.messages.length, 3, 'handoff must not send while frontend is Cline');
+    blocked.status = 'sent';
+    blocked.sentAt = new Date(0).toISOString();
+    await outbox.save();
+    await outbox.flush();
+    assert.equal(bridge.messages.length, 3, 'sent handoff must not retry while frontend is Cline');
+    allowHandoff = true;
+    await outbox.flush();
+    assert.equal(outbox.entries[blocked.id].status, 'acked');
+    assert.equal(bridge.messages.length, 4);
+    console.log('HANDOFF_GATE');
+
     const reload = new Outbox(file, bridge, { graceMs: 1000, checkTimeoutMs: 1000, log: () => {} });
     await reload.load();
     assert.equal(reload.pending().length, 0);

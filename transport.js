@@ -189,6 +189,7 @@ class Outbox {
         this.timer = null;
         this.lock = Promise.resolve();
         this.onAck = null;
+        this.canSend = null;
     }
 
     async withLock(operation) {
@@ -356,6 +357,7 @@ class Outbox {
                 if (!entries.length) return;
                 for (const entry of entries) {
                     if (entry.status === 'acked' || entry.status === 'held') continue;
+                    if (this.canSend && !this.canSend(entry)) continue;
                     let found;
                     try {
                         found = await this.bridge.hasMarker(entry.threadId, entry.marker);

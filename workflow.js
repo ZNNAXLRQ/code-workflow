@@ -6,7 +6,6 @@ const prompts = require('./prompts');
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', NO_COLOR: '1' };
 const active = new Set(['准备中', '实现中', '测试中', '审查中', '集成中']);
-const activeAcceptTemps = new Set();
 const uriSafe = /^[a-z0-9][a-z0-9-]{0,35}$/;
 const maxCapture = 2 * 1024 * 1024;
 
@@ -685,17 +684,39 @@ class Workflow {
         }
     }
 
-    async pruneAcceptWorktrees() {
-        const raw = await git(this.repo, 'worktree', 'list', '--porcelain').catch(() => '');
+    async pruneAcceptWorktrees({ strict = true } = {}) {
+        const recorded = this.state.acceptTemp;
+        if (!recorded) return true;
+        const resolved = path.resolve(recorded);
         const store = path.resolve(this.store) + path.sep;
-        for (const line of raw.split(/\r?\n/)) {
-            if (!line.startsWith('worktree ')) continue;
-            const candidate = path.resolve(line.slice('worktree '.length).trim());
-            if (!candidate.startsWith(store)) continue;
-            if (!path.basename(candidate).startsWith('accept-')) continue;
-            if (activeAcceptTemps.has(candidate)) continue;
-            await git(this.repo, 'worktree', 'remove', '--force', candidate).catch(() => {});
+        if (!resolved.startsWith(store)) {
+            delete this.state.acceptTemp;
+            await this.save();
+            return true;
         }
+        let listed;
+        try { listed = await git(this.repo, 'worktree', 'list', '--porcelain'); }
+        catch (error) {
+            if (strict) throw new Error('无法核对上次验收临时工作树，未清理：' + error.message);
+            this.log('[accept] 无法核对验收临时工作树，已保留：' + resolved);
+            return false;
+        }
+        const present = listed.split(/\r?\n/).some(line =>
+            line.startsWith('worktree ') && path.resolve(line.slice('worktree '.length).trim()) === resolved);
+        if (!present) {
+            delete this.state.acceptTemp;
+            await this.save();
+            return true;
+        }
+        try { await git(this.repo, 'worktree', 'remove', resolved); }
+        catch (error) {
+            if (strict) throw new Error('上次验收临时工作树有未提交改动，已保留：' + resolved);
+            this.log('[accept] 保留未清理的验收临时工作树：' + resolved + '：' + error.message);
+            return false;
+        }
+        delete this.state.acceptTemp;
+        await this.save();
+        return true;
     }
 
     async mergeStage(target) {
@@ -721,11 +742,13 @@ class Workflow {
             return;
         }
         const temporary = path.join(this.state.directory, 'accept-' + randomUUID().slice(0, 8));
-        activeAcceptTemps.add(temporary);
+        this.state.acceptTemp = temporary;
+        await this.save();
         try {
             await git(this.repo, 'worktree', 'add', temporary, target);
         } catch (error) {
-            activeAcceptTemps.delete(temporary);
+            delete this.state.acceptTemp;
+            await this.save();
             throw new Error('无法在目标分支「' + target + '」上合并：' + error.message);
         }
         try {
@@ -739,8 +762,13 @@ class Workflow {
                 throw error;
             }
         } finally {
-            await git(this.repo, 'worktree', 'remove', '--force', temporary).catch(() => {});
-            activeAcceptTemps.delete(temporary);
+            try {
+                await git(this.repo, 'worktree', 'remove', temporary);
+                delete this.state.acceptTemp;
+                await this.save();
+            } catch (error) {
+                this.log('[accept] 验收临时工作树未自动移除，已保留：' + temporary + '：' + error.message);
+            }
         }
     }
 
@@ -821,7 +849,7 @@ class Workflow {
         this.archiveCurrent();
         if (this.pipelineOwner) this.owner.stages.delete(this.state.id);
         await this.save();
-        await this.pruneAcceptWorktrees();
+        await this.pruneAcceptWorktrees({ strict: false });
         await this.cleanupStage();
         const archived = this.owner?.archive?.find(record => record.id === this.state.id);
         if (archived) archived.preservedWorktrees = this.state.preservedWorktrees || [];
