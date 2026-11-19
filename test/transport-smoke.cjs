@@ -1,65 +1,58 @@
+const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { HostBridge, Outbox } = require('../transport');
-const { readTurns } = require('../codex-session');
+const { Outbox } = require('../transport');
 
-const threadId = process.argv[2] || '01a1f581-7b0b-7bb1-9b5a-37116598ebce';
-const file = path.join(os.tmpdir(), 'local-workflow-outbox-smoke.json');
+class FakeBridge {
+    constructor() { this.messages = []; }
+    async connect() {}
+    async hasMarker(threadId, marker) { return this.messages.some(item => item.marker === marker); }
+    async sendMessage(threadId, prompt) {
+        const marker = prompt.split('\n')[0];
+        this.messages.push({ threadId, marker, prompt });
+    }
+    async waitForMarker(threadId, marker) { return this.messages.some(item => item.marker === marker); }
+    close() {}
+}
 
 (async () => {
-    await fs.rm(file, { force: true });
-    const bridge = new HostBridge({
-        log: message => console.log(message),
-        readTurns: threadId => readTurns({ cwd: process.cwd(), threadId, limit: 10 })
-    });
-    await bridge.connect();
-    console.log('PIPE', bridge.pipePath, 'TOOLS', bridge.tools?.length);
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'outbox-smoke-'));
+    const file = path.join(dir, 'outbox.json');
+    const bridge = new FakeBridge();
+    const outbox = new Outbox(file, bridge, { graceMs: 1000, checkTimeoutMs: 1000, log: () => {} });
 
-    const outbox = new Outbox(file, bridge, { log: message => console.log(message), graceMs: 5000, checkTimeoutMs: 20000 });
-    const entry = await outbox.enqueue(threadId, 'Transport smoke ' + new Date().toISOString() + '. Reply with exactly: ok.');
-    console.log('ENQUEUED', entry.id, entry.marker);
-    await outbox.flush();
-    const visible = await bridge.hasMarker(threadId, entry.marker);
-    console.log('AFTER_FLUSH', JSON.stringify({ visible, status: outbox.entries[entry.id]?.status, attempts: outbox.entries[entry.id]?.attempts }));
+    const entry = await outbox.enqueue('thread-smoke', 'Transport smoke ' + Date.now() + '.');
+    assert.equal(entry.status, 'pending');
+    assert.equal(await bridge.hasMarker('thread-smoke', entry.marker), true);
+    assert.equal(outbox.entries[entry.id].status, 'acked');
+    assert.equal(bridge.messages.length, 1);
+    console.log('ENQUEUED_AND_ACKED', entry.id);
 
-    const reload = new Outbox(file, bridge, { log: message => console.log(message), graceMs: 5000, checkTimeoutMs: 20000 });
+    const reload = new Outbox(file, bridge, { graceMs: 1000, checkTimeoutMs: 1000, log: () => {} });
     await reload.load();
-    console.log('RELOAD_PENDING', reload.pending().length, 'STATUS', reload.entries[entry.id]?.status);
-    await reload.flush();
-    console.log('RELOAD_AFTER_FLUSH', reload.entries[entry.id]?.status);
+    assert.equal(reload.pending().length, 0);
+    assert.equal(reload.entries[entry.id].status, 'acked');
+    console.log('RELOAD_ACKED', reload.entries[entry.id].status);
 
-    // Simulate a crash after sending but before ack: write a sent entry and let a new outbox recover it.
     const crashMarker = '[wf:crash-' + Date.now() + ']';
     const crashEntry = {
-        id: 'crash-' + Date.now(),
-        kind: 'message',
-        threadId,
-        marker: crashMarker,
-        prompt: crashMarker + '\nCrash recovery smoke. Reply with exactly: ok.',
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        sentAt: null,
-        ackedAt: null,
-        attempts: 0
+        id: 'crash-' + Date.now(), kind: 'message', threadId: 'thread-smoke',
+        marker: crashMarker, prompt: crashMarker + '\nCrash recovery smoke.',
+        status: 'sent', createdAt: new Date().toISOString(), sentAt: new Date().toISOString(),
+        ackedAt: null, attempts: 1
     };
-    const reloaded = new Outbox(file, bridge, { log: message => console.log(message), graceMs: 5000, checkTimeoutMs: 20000 });
-    await reloaded.load();
-    reloaded.entries[crashEntry.id] = crashEntry;
-    await reloaded.save();
-    await bridge.sendMessage(threadId, crashEntry.prompt);
-    crashEntry.status = 'sent';
-    crashEntry.sentAt = new Date().toISOString();
-    crashEntry.attempts = 1;
-    await reloaded.save();
-    const afterCrash = new Outbox(file, bridge, { log: message => console.log(message), graceMs: 60000, checkTimeoutMs: 20000 });
-    await afterCrash.load();
-    await afterCrash.flush();
-    console.log('CRASH_RECOVERY', JSON.stringify({ status: afterCrash.entries[crashEntry.id]?.status, attempts: afterCrash.entries[crashEntry.id]?.attempts }));
+    await bridge.sendMessage('thread-smoke', crashEntry.prompt);
+    const crashed = new Outbox(file, bridge, { graceMs: 60000, checkTimeoutMs: 1000, log: () => {} });
+    await crashed.load();
+    crashed.entries[crashEntry.id] = crashEntry;
+    await crashed.save();
+    await crashed.flush();
+    assert.equal(crashed.entries[crashEntry.id].status, 'acked');
+    console.log('CRASH_RECOVERY', crashed.entries[crashEntry.id].status);
 
-    bridge.close();
     outbox.stop();
     reload.stop();
-    reloaded.stop();
-    afterCrash.stop();
-})().catch(error => { console.error('FAILED', error.message); process.exitCode = 1; });
+    crashed.stop();
+    await fs.rm(dir, { recursive: true, force: true });
+})().catch(error => { console.error('FAILED', error); process.exitCode = 1; });

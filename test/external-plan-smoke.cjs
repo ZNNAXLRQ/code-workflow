@@ -35,7 +35,7 @@ const { Workflow, git } = require('../workflow');
         testCommand: 'node --test',
         tasks: [{
             id: 'one', title: '写 a.txt', requirements: '写文件', criteria: ['文件存在'],
-            paths: ['a.txt'], dependsOn: [], testCoverage: ['fixture'], testCommand: ''
+            paths: ['a.txt'], dependsOn: [], testCommand: ''
         }]
     };
     const workflow = new Workflow({

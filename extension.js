@@ -854,7 +854,7 @@ function activate(context) {
                                     criteria: task.criteria || task.acceptance || [],
                                     paths: task.paths || task.files || [],
                                     dependsOn: task.dependsOn || [],
-                                    testCoverage: task.testCoverage || [],
+                                    testCoverage: task.testCoverage,
                                     testCommand: task.testCommand || ''
                                 }));
                                 const plan = {
@@ -893,8 +893,8 @@ function activate(context) {
                                 if (payload.planId && payload.planId !== pending.id) {
                                     throw Object.assign(new Error('方案已更新，请重新确认'), { statusCode: 409 });
                                 }
-                                loaded.pendingPlan = null;
                                 const worker = await loaded.startStageWithPlan(pending.plan, pending.request, pending.testCommand);
+                                loaded.pendingPlan = null;
                                 return { stageId: worker.state.id, phase: worker.state.phase };
                             },
                             discard: async payload => {
@@ -922,10 +922,25 @@ function activate(context) {
                             },
                             answer: async payload => {
                                 ensureCodexFrontend();
-                                const worker = payload.taskId
-                                    ? loaded.stageWorkers().find(candidate => (candidate.state.inbox || [])[0]?.id === payload.taskId)
-                                    : loaded.stageWorker(payload.stageId);
-                                if (!worker) throw Object.assign(new Error('找不到等待回答的任务'), { statusCode: 404 });
+                                if (!payload.taskId) {
+                                    throw Object.assign(new Error('回答任务必须提供 taskId'), { statusCode: 400 });
+                                }
+                                let worker = payload.stageId ? loaded.stageWorker(payload.stageId) : null;
+                                if (payload.stageId && !worker) {
+                                    throw Object.assign(new Error('找不到阶段'), { statusCode: 404 });
+                                }
+                                if (!worker) {
+                                    const matches = loaded.stageWorkers().filter(candidate =>
+                                        (candidate.state.inbox || [])[0]?.id === payload.taskId);
+                                    if (matches.length > 1) {
+                                        throw Object.assign(new Error('多个阶段都有这个任务在等待回答，请提供 stageId'),
+                                            { statusCode: 409 });
+                                    }
+                                    worker = matches[0];
+                                }
+                                if (!worker || (worker.state.inbox || [])[0]?.id !== payload.taskId) {
+                                    throw Object.assign(new Error('找不到等待回答的任务'), { statusCode: 404 });
+                                }
                                 await worker.action('answerTask', payload.answer, payload.taskId);
                                 return { stageId: worker.state.id, taskId: payload.taskId };
                             },

@@ -187,6 +187,19 @@ class Outbox {
         this.flushing = false;
         this.again = false;
         this.timer = null;
+        this.lock = Promise.resolve();
+    }
+
+    async withLock(operation) {
+        const previous = this.lock;
+        let release;
+        this.lock = new Promise(resolve => { release = resolve; });
+        await previous;
+        try {
+            return await operation();
+        } finally {
+            release();
+        }
     }
 
     async load() {
@@ -215,7 +228,6 @@ class Outbox {
     }
 
     async enqueue(threadId, text, { marker, kind = 'message' } = {}) {
-        await this.load();
         const id = randomUUID();
         marker = marker || `[wf:${id}]`;
         const entry = {
@@ -227,8 +239,11 @@ class Outbox {
             ackedAt: null,
             attempts: 0
         };
-        this.entries[id] = entry;
-        await this.save();
+        await this.withLock(async () => {
+            await this.load();
+            this.entries[id] = entry;
+            await this.save();
+        });
         try {
             await this.flush();
         } catch (error) {
@@ -244,43 +259,45 @@ class Outbox {
         }
         this.flushing = true;
         try {
-            await this.load();
-            const entries = this.pending().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-            if (!entries.length) return;
-            for (const entry of entries) {
-                if (entry.status === 'acked') continue;
-                let found;
-                try {
-                    found = await this.bridge.hasMarker(entry.threadId, entry.marker);
-                } catch (error) {
-                    this.log('[outbox] 检查目标会话失败，保留待发送：' + error.message);
-                    return;
-                }
-                if (found) {
-                    entry.status = 'acked';
-                    entry.ackedAt = new Date().toISOString();
+            await this.withLock(async () => {
+                await this.load();
+                const entries = this.pending().sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+                if (!entries.length) return;
+                for (const entry of entries) {
+                    if (entry.status === 'acked') continue;
+                    let found;
+                    try {
+                        found = await this.bridge.hasMarker(entry.threadId, entry.marker);
+                    } catch (error) {
+                        this.log('[outbox] 检查目标会话失败，保留待发送：' + error.message);
+                        return;
+                    }
+                    if (found) {
+                        entry.status = 'acked';
+                        entry.ackedAt = new Date().toISOString();
+                        await this.save();
+                        continue;
+                    }
+                    const due = entry.status === 'pending' ||
+                        (entry.status === 'sent' && Date.now() - Date.parse(entry.sentAt || 0) > this.graceMs);
+                    if (!due) continue;
+                    try {
+                        await this.bridge.sendMessage(entry.threadId, entry.prompt);
+                    } catch (error) {
+                        this.log('[outbox] 发送失败，保留待发送：' + error.message);
+                        return;
+                    }
+                    entry.status = 'sent';
+                    entry.sentAt = new Date().toISOString();
+                    entry.attempts += 1;
                     await this.save();
-                    continue;
+                    if (await this.bridge.waitForMarker(entry.threadId, entry.marker, this.checkTimeoutMs)) {
+                        entry.status = 'acked';
+                        entry.ackedAt = new Date().toISOString();
+                        await this.save();
+                    }
                 }
-                const due = entry.status === 'pending' ||
-                    (entry.status === 'sent' && Date.now() - Date.parse(entry.sentAt || 0) > this.graceMs);
-                if (!due) continue;
-                try {
-                    await this.bridge.sendMessage(entry.threadId, entry.prompt);
-                } catch (error) {
-                    this.log('[outbox] 发送失败，保留待发送：' + error.message);
-                    return;
-                }
-                entry.status = 'sent';
-                entry.sentAt = new Date().toISOString();
-                entry.attempts += 1;
-                await this.save();
-                if (await this.bridge.waitForMarker(entry.threadId, entry.marker, this.checkTimeoutMs)) {
-                    entry.status = 'acked';
-                    entry.ackedAt = new Date().toISOString();
-                    await this.save();
-                }
-            }
+            });
         } finally {
             this.flushing = false;
             if (this.again) {
