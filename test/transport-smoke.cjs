@@ -46,6 +46,23 @@ class FakeBridge {
     assert.equal(bridge.messages.length, 2);
     console.log('HOLD_RELEASED', held.id);
 
+    const oldPending = {
+        id: 'old-pending', kind: 'handoff', threadId: 'thread-smoke',
+        marker: '[wf:old-pending]', prompt: '[wf:old-pending]\nold pending',
+        status: 'pending', createdAt: new Date().toISOString(),
+        sentAt: null, ackedAt: null, attempts: 0, meta: { handoffIds: ['old-1'] }
+    };
+    await outbox.load();
+    outbox.entries[oldPending.id] = oldPending;
+    await outbox.save();
+    await outbox.holdHandoff(['old-1']);
+    assert.equal(outbox.entries[oldPending.id].status, 'held');
+    assert.equal(bridge.messages.length, 2);
+    await outbox.releaseHeld();
+    assert.equal(outbox.entries[oldPending.id].status, 'acked');
+    assert.equal(bridge.messages.length, 3);
+    console.log('OLD_PENDING_HELD');
+
     const reload = new Outbox(file, bridge, { graceMs: 1000, checkTimeoutMs: 1000, log: () => {} });
     await reload.load();
     assert.equal(reload.pending().length, 0);

@@ -42,10 +42,13 @@ const config = () => ({ pipeline: true, maxParallel: '1', maxRepairs: 2, useClin
     }
     assert.equal(worker.state.phase, '待验收');
     await git(repo, 'commit', '--allow-empty', '-m', 'advance target');
-    worker.finishStage = async () => { throw new Error('simulated interruption'); };
+    worker.finishStage = async () => {
+        worker.state.phase = '联合验收中';
+        await worker.save();
+        throw new Error('simulated interruption');
+    };
     await assert.rejects(worker.action('accept'), /simulated interruption/);
-    assert.equal(worker.state.phase, '待重新验证');
-    assert.notEqual(worker.state.stageHead, worker.state.targetHead);
+    assert.equal(worker.state.phase, '联合验收中');
 
     const second = new Workflow({ repo, store, config, adapter, changed() {}, log() {} });
     await second.load();

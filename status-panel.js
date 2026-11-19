@@ -332,6 +332,9 @@ function stageActions(stage) {
         () => send('action', { action: 'rollback', task: candidate.id, run: stage.id }), 'secondary', !candidate));
     const accepting = phase === '待验收' || stageBadgeName(stage) === '待验收';
     const revalidating = phase === '待重新验证';
+    const resumable = phase === '已暂停' || phase === '需处理';
+    box.append(actionButton('继续执行',
+        () => send('action', { action: 'resume', run: stage.id }), 'primary', !resumable));
     box.append(actionButton('继续重新验证',
         () => send('action', { action: 'revalidate', run: stage.id }), 'primary', !revalidating));
     box.append(actionButton('验收',

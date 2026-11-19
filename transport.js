@@ -258,8 +258,13 @@ class Outbox {
         });
         if (existing) {
             if (existing.status === 'acked') {
-                try { await this.notifyAck(existing); }
-                catch (error) { this.log('[outbox] 补记交接确认失败：' + error.message); }
+                try {
+                    await this.withLock(async () => {
+                        await this.load();
+                        const current = this.entries[existing.id];
+                        if (current?.status === 'acked') await this.notifyAck(current);
+                    });
+                } catch (error) { this.log('[outbox] 补记交接确认失败：' + error.message); }
             }
             return existing;
         }
@@ -285,6 +290,35 @@ class Outbox {
         });
         try { await this.flush(); }
         catch (error) { this.log('[outbox] 释放待发送消息失败：' + error.message); }
+    }
+
+    async holdHandoff(ids) {
+        const wanted = new Set(ids || []);
+        if (!wanted.size) return;
+        await this.withLock(async () => {
+            await this.load();
+            let changed = false;
+            for (const entry of Object.values(this.entries)) {
+                if (entry.kind !== 'handoff' || entry.status !== 'pending') continue;
+                if (!(entry.meta?.handoffIds || []).some(id => wanted.has(id))) continue;
+                entry.status = 'held';
+                changed = true;
+            }
+            if (changed) await this.save();
+        });
+    }
+
+    async holdAllHandoff() {
+        await this.withLock(async () => {
+            await this.load();
+            let changed = false;
+            for (const entry of Object.values(this.entries)) {
+                if (entry.kind !== 'handoff' || entry.status !== 'pending') continue;
+                entry.status = 'held';
+                changed = true;
+            }
+            if (changed) await this.save();
+        });
     }
 
     async notifyAck(entry) {

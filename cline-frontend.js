@@ -70,15 +70,22 @@ function markHandoffRequests(repo, ids, at = new Date().toISOString()) {
 function resolveHandoffQueue(repo, handoff, { knownIds = new Set() } = {}) {
     const state = readHandoffState(repo);
     const legacyUsed = new Set();
+    const seen = new Map();
     const queue = (handoff?.queue || []).map(entry => {
         let id = entry.id;
         if (!id) {
             const legacyId = requestId(entry.request);
+            const occurrence = (seen.get(legacyId) || 0) + 1;
+            seen.set(legacyId, occurrence);
             if ((state.requests[legacyId] || knownIds.has(legacyId)) && !legacyUsed.has(legacyId)) {
                 id = legacyId;
                 legacyUsed.add(legacyId);
             } else {
-                throw new Error('Cline 请求缺少唯一 id；请让 Cline 为 queue 项写入稳定的 id（UUID）。');
+                const assigned = state.assignments[legacyId + ':' + occurrence];
+                if (!assigned) {
+                    throw new Error('Cline 请求缺少唯一 id；请让 Cline 为 queue 项写入稳定的 id（UUID）。');
+                }
+                id = assigned;
             }
         }
         return {

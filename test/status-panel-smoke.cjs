@@ -235,6 +235,7 @@ has(html, /send\('action', \{ action: 'interrupt', run: stage\.id \}\)/, '中断
 has(html, /send\('action', \{ action: 'cancelStage', run: stage\.id \}\)/, '取消阶段 action:cancelStage');
 has(html, /send\('action', \{ action: 'rollback', task: candidate\.id, run: stage\.id \}\)/, '回退本轮 action:rollback');
 has(html, /send\('action', \{ action: 'accept', run: stage\.id \}\)/, '验收 action:accept');
+has(html, /send\('action', \{ action: 'resume', run: stage\.id \}\)/, '继续执行 action:resume');
 has(html, /send\('action', \{ action: 'revalidate', run: stage\.id \}\)/, '继续重新验证 action:revalidate');
 has(html, /继续重新验证/, '待重新验证阶段有继续按钮');
 has(html, /send\('action', \{ action: 'retry', run: stage\.id \}\)/, '阶段重试 action:retry');

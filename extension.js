@@ -628,6 +628,11 @@ function activate(context) {
         stopClineWatch(item);
         let handoff = null;
         await item.outbox.load();
+        try { await item.outbox.holdAllHandoff(); }
+        catch (error) {
+            startClineWatch(item);
+            throw new Error('无法暂存待发送交接消息，已保持 Cline 前端：' + error.message);
+        }
         try { handoff = clineFrontend.readHandoff(item.repo); }
         catch (error) {
             startClineWatch(item);
@@ -647,6 +652,11 @@ function activate(context) {
         const queued = new Set(knownIds);
         const pending = queue.filter(entry => !entry.handedOff && !queued.has(entry.id));
         item.clineHandoff = { ...(handoff || {}), queue };
+        try { await item.outbox.holdHandoff(queue.map(entry => entry.id)); }
+        catch (error) {
+            startClineWatch(item);
+            throw new Error('无法暂存待发送交接消息，已保持 Cline 前端：' + error.message);
+        }
         let threadId = item.codexThreadId;
         try { threadId = bindingStore.readBinding(item.repo)?.codexThreadId || threadId; } catch {}
         let receipt = null;
@@ -880,6 +890,9 @@ function activate(context) {
                 try { frontend = clineFrontend.readFrontend(repo); } catch (error) { log('[frontend] ' + error.message); }
                 loaded.frontend = frontend.mode;
                 loaded.clineSessionId = frontend.clineSessionId;
+                if (frontend.mode === 'cline') {
+                    await loaded.outbox.holdAllHandoff().catch(error => log('[outbox] 暂存交接消息失败：' + error.message));
+                }
                 loaded.outbox.start();
                 if (frontend.mode === 'codex') {
                     loaded.outbox.releaseHeld().catch(error => log('[outbox] 恢复待发送交接失败：' + error.message));

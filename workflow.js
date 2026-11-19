@@ -297,6 +297,12 @@ class Workflow {
     }
 
     restoreExecution() {
+        if (this.state.revalidating && ['联合验收中', '已暂停', '已请求暂停'].includes(this.state.phase)) {
+            this.state.phase = '待重新验证';
+            delete this.state.stageStep;
+            this.state.message = '目标基线更新被中断，请继续重新验证。';
+            return true;
+        }
         if (this.state.phase === '规划中') {
             this.state.phase = '规划失败';
             this.state.message = '规划过程曾中断，可以重新规划。';
@@ -699,7 +705,7 @@ class Workflow {
             }
             return;
         }
-        const temporary = path.join(this.state.directory, 'accept');
+        const temporary = path.join(this.state.directory, 'accept-' + randomUUID().slice(0, 8));
         try {
             await git(this.repo, 'worktree', 'add', temporary, target);
         } catch (error) {
@@ -821,6 +827,7 @@ class Workflow {
         this.state.stageHead = (await git(this.state.stageTree, 'rev-parse', 'HEAD')).trim();
         this.state.targetHead = tip;
         this.state.phase = '待重新验证';
+        this.state.revalidating = true;
         delete this.state.stageReview;
         await this.save();
         await this.finishStage();
@@ -1385,6 +1392,8 @@ class Workflow {
             if (review.verdict === 'changes_requested') {
                 const scoped = repairsByFile(review.findings, this.state.tasks.flatMap(task => task.paths));
                 await this.stageRepair(JSON.stringify(review.findings.filter(item => item.blocking)), scoped);
+                delete this.state.revalidating;
+                await this.save();
                 try { this.reviewJournal?.commit({ stageId: this.state.id, taskId: 'stage', candidate: reviewedCandidate }); }
                 catch (error) { this.log('[review-journal] ' + error.message); }
                 return;
@@ -1401,6 +1410,8 @@ class Workflow {
             if (this.phaseController === controller) this.phaseController = undefined;
             this.schedule();
         }
+        await this.save();
+        delete this.state.revalidating;
         await this.save();
         try { this.reviewJournal?.commit({ stageId: this.state.id, taskId: 'stage', candidate: reviewedCandidate }); }
         catch (error) { this.log('[review-journal] ' + error.message); }
