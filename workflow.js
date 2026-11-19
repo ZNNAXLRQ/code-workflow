@@ -6,6 +6,7 @@ const prompts = require('./prompts');
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', NO_COLOR: '1' };
 const active = new Set(['准备中', '实现中', '测试中', '审查中', '集成中']);
+const activeAcceptTemps = new Set();
 const uriSafe = /^[a-z0-9][a-z0-9-]{0,35}$/;
 const maxCapture = 2 * 1024 * 1024;
 
@@ -684,6 +685,19 @@ class Workflow {
         }
     }
 
+    async pruneAcceptWorktrees() {
+        const raw = await git(this.repo, 'worktree', 'list', '--porcelain').catch(() => '');
+        const store = path.resolve(this.store) + path.sep;
+        for (const line of raw.split(/\r?\n/)) {
+            if (!line.startsWith('worktree ')) continue;
+            const candidate = path.resolve(line.slice('worktree '.length).trim());
+            if (!candidate.startsWith(store)) continue;
+            if (!path.basename(candidate).startsWith('accept-')) continue;
+            if (activeAcceptTemps.has(candidate)) continue;
+            await git(this.repo, 'worktree', 'remove', '--force', candidate).catch(() => {});
+        }
+    }
+
     async mergeStage(target) {
         const head = this.state.stageHead;
         const message = `merge: 工作流阶段 ${this.state.id} 验收`;
@@ -693,6 +707,7 @@ class Workflow {
                 ' → ' + tip.slice(0, 8) + '），不能在未重新测试合并结果的情况下验收。请重新规划/测试。');
         }
         const current = (await git(this.repo, 'rev-parse', '--abbrev-ref', 'HEAD')).trim();
+        await this.pruneAcceptWorktrees();
         if (current === target) {
             if ((await git(this.repo, 'status', '--porcelain')).trim()) {
                 throw new Error('目标分支有未提交改动，无法合并；请先提交或清理工作区。');
@@ -706,9 +721,11 @@ class Workflow {
             return;
         }
         const temporary = path.join(this.state.directory, 'accept-' + randomUUID().slice(0, 8));
+        activeAcceptTemps.add(temporary);
         try {
             await git(this.repo, 'worktree', 'add', temporary, target);
         } catch (error) {
+            activeAcceptTemps.delete(temporary);
             throw new Error('无法在目标分支「' + target + '」上合并：' + error.message);
         }
         try {
@@ -723,6 +740,7 @@ class Workflow {
             }
         } finally {
             await git(this.repo, 'worktree', 'remove', '--force', temporary).catch(() => {});
+            activeAcceptTemps.delete(temporary);
         }
     }
 
@@ -803,6 +821,7 @@ class Workflow {
         this.archiveCurrent();
         if (this.pipelineOwner) this.owner.stages.delete(this.state.id);
         await this.save();
+        await this.pruneAcceptWorktrees();
         await this.cleanupStage();
         const archived = this.owner?.archive?.find(record => record.id === this.state.id);
         if (archived) archived.preservedWorktrees = this.state.preservedWorktrees || [];
