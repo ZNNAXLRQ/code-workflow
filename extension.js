@@ -833,7 +833,8 @@ function activate(context) {
                         'batchId: ' + batch.id,
                         lines.join('\n\n'),
                         '请用原生工具核对仓库；完成后调用 submit_review_batch，batchId 原样返回，按提交 ID 逐项给出结论。',
-                        '结论必须自洽：任一验收项不是 met，或存在任何 finding，verdict 必须是 changes_requested，不能 pass；pass 时 findings 必须为空。'
+                        '结论必须自洽：任一验收项不是 met，或存在任何 finding，verdict 必须是 changes_requested，不能 pass；pass 时 findings 必须为空。',
+                        'changes_requested 必须至少包含一条 blocking:true 的 finding；没有阻塞问题就必须给 pass，不能给空返修。'
                     ].join('\n\n');
                     await item.outbox.enqueue(threadId, message, { kind: 'review' });
                 }
