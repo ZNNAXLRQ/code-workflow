@@ -70,7 +70,8 @@ description: DSH 前端的本地开发工作流。用户要求实现/修复功�
 - 阶段进入 `待验收` 后，`workflow_status` 返回的 `stage.reportInput` 是工作流给 DSH 前端的报告输入。
 - 你负责根据它生成 Markdown 阶段报告：阶段名、需求、任务、测试、审查结论、提交范围；不需要完整审查报告。
 - 用 `workflow_stage_report` 提交报告，传 `repo`、`stageId`、`report`、`author: 'dsh'`。
-- 提交报告不等于验收；不要调用 `workflow_accept`。验收在 VS Code 插件的验收 tab 完成，tab 的确认会转给工作流。
+- 提交后把报告展示给用户。用户可以在这里直接验收：明确说“验收/通过”时，可以调用 `workflow_accept`；也可以由用户在 VS Code 验收 tab 点验收。
+- 提交报告不等于验收；不要自行验收，必须等用户明确决定。两边任一处验收后，工作流和验收 tab 会同步。
 
 ## 验收、取消、纠偏
 
