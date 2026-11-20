@@ -129,7 +129,6 @@
     "binding.js",
     "cline-cli.js",
     "dsh-frontend.js",
-    "dsh-review.js",
     "review-broker.js",
     "review-journal.js",
     "README.md",
