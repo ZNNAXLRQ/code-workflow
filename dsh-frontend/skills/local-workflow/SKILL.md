@@ -24,13 +24,12 @@ description: DSH 前端的本地开发工作流。用户要求实现/修复功�
 2. 拆成可独立执行的小任务，每项提供 `id`、`title`、`description`、`files`、
    `dependsOn`、`acceptance`、可选 `testCoverage` 和 `testCommand`。顶层必须
    有仓库级 `testCommand`。
-3. 调用 `submit_plan` 暂存方案，**不会派发**。
-4. 向用户说明计划并明确问“确认开始实施吗？”。
-5. 用户明确确认后才调用 `confirm_plan`，传 `repo` 和 `planId`。用户说再改、
-   先别开始或只是讨论时不要确认；需要时调用 `discard_plan`。
-6. 若 `submit_plan` 返回 `initialCommit: true`，确认前告诉用户会先提交
-   `dirtyCount` 个未提交文件作为基线，并等用户明确决定。
-7. 提交成功后等待，不要自己开始改代码。
+3. 如果用户还在讨论或只是描述目标：只读检查并讨论，不要提前派发。
+4. 如果用户经过讨论后明确说“按这个计划实施 / 开始 / 确认 / 派发”：把这句话视为**最终确认**——先调用 `submit_plan` 生成任务拆分，成功后立即用返回的 `planId` 调用 `confirm_plan`，**不再二次询问**。
+5. 如果用户只是问方案、没有说开始：调用 `submit_plan` 暂存，说明任务拆分并问一次“确认开始实施吗？”；用户明确确认后才调用 `confirm_plan`。用户说再改、先别开始或只是讨论时不要确认；需要时调用 `discard_plan`。
+6. 如果已经有 pending plan，用户说“开始实施 / 确认 / 按这个计划执行”时直接确认该 `planId`，不要重新规划，也不要二次询问。
+7. 唯一例外：`submit_plan` 返回 `initialCommit: true` 且 `dirtyCount > 0` 时，先告诉用户会先提交 `dirtyCount` 个未提交文件作为基线，等用户明确决定；计划校验失败也停下来报告。
+8. 提交成功后等待，不要自己开始改代码；实现由 Cline 执行。
 
 ## 审查
 
