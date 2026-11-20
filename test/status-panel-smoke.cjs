@@ -125,8 +125,9 @@ text(html, 'id="commitSnapshotSettings"', '设置页保留提交快照按钮');
 // --- 阶段状态：进行中 / 阻塞 / 待验收 ---------------------------------------
 text(html, 'function stageDisplayState(stage)', '阶段状态汇总函数');
 text(html, "if (phase === '待验收') return '待验收';", '待验收阶段识别');
-text(html, "if (blocked.length || ['需处理', '已暂停', '已请求暂停', '规划失败'].includes(phase)) return '阻塞';",
-    '任务阻塞或阶段阻塞归为阻塞');
+text(html, "if (blocked.length) return '阻塞';", '有阻塞任务才归为阻塞');
+text(html, "if (tasks.length && tasks.every(task => text(task.status) === '已集成')) return '待验收';",
+    '所有任务已集成时阶段自动待验收');
 text(html, "return '进行中';", '其余阶段为进行中');
 text(html, 'function stageBlockedTasks(stage)', '阻塞任务识别');
 text(html, "['需处理', '已取消'].includes", '需处理/已取消任务视为阻塞');

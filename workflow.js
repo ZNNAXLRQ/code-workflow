@@ -324,7 +324,15 @@ class Workflow {
                     task.reason = '可重试，已有改动已保留';
                 } else if (active.has(task.status) || task.status === '排队执行') task.status = '排队中';
             }
-            return true;
+        }
+        if (this.state.phase === '已暂停' && /执行过程曾中断/.test(this.state.message || '')) {
+            const blocked = this.state.tasks.some(task => ['需处理', '已取消'].includes(task.status));
+            const activeNow = this.state.tasks.some(task => active.has(task.status));
+            if (!blocked && !activeNow && this.state.tasks.length) {
+                this.state.phase = '运行中';
+                this.state.message = '';
+                return true;
+            }
         }
         return false;
     }

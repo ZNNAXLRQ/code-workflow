@@ -82,8 +82,10 @@ const stageReview = data => ({
     });
     await second.load();
     const worker2 = second.stageWorker(stageId);
-    assert.equal(worker2.state.phase, '已暂停');
-    await worker2.action('resume');
+    assert.ok(['已暂停', '运行中'].includes(worker2.state.phase),
+        'reload should either keep the stage paused or auto-resume when no task is blocked');
+    if (worker2.state.phase === '已暂停') await worker2.action('resume');
+    else if (worker2.state.phase === '运行中') await worker2.tick();
     for (let index = 0; index < 200; index++) {
         if (worker2.state.phase === '待验收') break;
         if (worker2.state.phase === '需处理') throw new Error(worker2.state.message);

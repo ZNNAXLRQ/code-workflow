@@ -383,7 +383,9 @@ function stageDisplayState(stage) {
     const phase = text(stage.phase);
     if (phase === '待验收') return '待验收';
     const blocked = stageBlockedTasks(stage);
-    if (blocked.length || ['需处理', '已暂停', '已请求暂停', '规划失败'].includes(phase)) return '阻塞';
+    if (blocked.length) return '阻塞';
+    const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
+    if (tasks.length && tasks.every(task => text(task.status) === '已集成')) return '待验收';
     return '进行中';
 }
 
