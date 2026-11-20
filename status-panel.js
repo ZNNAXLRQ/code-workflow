@@ -78,6 +78,9 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
 .field>label{min-width:92px}
 .field .label{flex:1;min-width:0}
 .card{border:1px solid var(--vscode-panel-border);border-radius:4px;padding:8px 10px;margin:0 0 8px;background:var(--vscode-editor-background)}
+.stage-block{border:1px solid var(--vscode-panel-border);border-radius:8px;padding:12px;margin:0 0 16px}
+.stage-block>.card{margin:10px 0 0}
+.stage-block .card{border-color:var(--vscode-panel-border)}
 .badges{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
 .sbadge{border:1px solid var(--vscode-panel-border);border-radius:10px;padding:1px 8px;font-size:.88em;color:var(--vscode-descriptionForeground);white-space:nowrap}
 .sbadge.on{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border-color:transparent}
@@ -153,14 +156,8 @@ textarea{width:100%;box-sizing:border-box;min-height:54px;border:1px solid var(-
       </div>
     </section>
     <section id="codexSection">
-      <div class="field" id="stagePickerRow" hidden>
-        <label for="stagePicker">阶段</label>
-        <select id="stagePicker" aria-label="选择阶段"></select>
-      </div>
-      <h3>当前阶段</h3>
+      <h3>阶段与任务</h3>
       <div id="stageCard"></div>
-      <h3>阶段任务</h3>
-      <div id="tasks"></div>
     </section>
     <section id="queueSection" hidden>
       <h3>等待开始的请求</h3>
@@ -395,31 +392,34 @@ function shortReason(value, max = 240) {
     return textValue.length > max ? textValue.slice(0, max) + '…' : textValue;
 }
 
-function renderStageCard() {
+function renderStages(list) {
     const target = $('stageCard');
-    const stage = selectedStage();
     target.replaceChildren();
-    if (!stage) {
+    if (!list.length) {
         target.append(node('p', '当前没有进行中的阶段。', 'label'));
         return;
     }
+    for (const stage of list) target.append(stageBlock(stage));
+}
+
+function stageBlock(stage) {
+    const wrapper = node('div', '', 'stage-block');
     const state = stageDisplayState(stage);
-    const card = node('div', '', 'card');
     const top = node('div', '', 'row');
     top.append(node('strong', stage.title || stage.request || stage.id || '未命名阶段'));
     top.append(node('span', state, state === '阻塞' ? 'badge danger' : 'badge'));
-    card.append(top);
+    wrapper.append(top);
 
     const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
     const integrated = tasks.filter(task => text(task.status) === '已集成').length;
-    card.append(node('p', '任务：共 ' + tasks.length + ' 个，已集成 ' + integrated + ' 个', 'label'));
+    wrapper.append(node('p', '任务：共 ' + tasks.length + ' 个，已集成 ' + integrated + ' 个', 'label'));
     const phase = text(stage.phase);
     const paused = ['已暂停', '已请求暂停', '需处理'].includes(phase);
     const actions = node('div', '', 'row');
     actions.append(actionButton(paused ? '继续' : '暂停',
         () => send('action', { action: paused ? 'stageResume' : 'stagePause', run: stage.id }),
         'secondary', ['已取消', '已验收'].includes(phase)));
-    card.append(actions);
+    wrapper.append(actions);
 
     if (state === '阻塞') {
         const blocked = stageBlockedTasks(stage);
@@ -429,19 +429,57 @@ function renderStageCard() {
                     (Array.isArray(other.dependsOn) ? other.dependsOn : []).includes(task.id));
                 const line = '阻塞任务：' + (task.title || task.id) +
                     (dependents.length ? '（依赖它的任务：' + dependents.map(item => item.title || item.id).join('、') + '）' : '');
-                card.append(node('p', line, 'label'));
+                wrapper.append(node('p', line, 'label'));
             }
         } else {
-            card.append(node('p', '阶段已阻塞，等待处理。', 'label'));
+            wrapper.append(node('p', '阶段已阻塞，等待处理。', 'label'));
         }
         const reason = (stage.waiting && stage.waiting.reason) || stage.message || '';
-        if (reason) card.append(node('p', '原因：' + shortReason(reason), 'label'));
+        if (reason) wrapper.append(node('p', '原因：' + shortReason(reason), 'label'));
     } else if (state === '待验收') {
-        card.append(node('p', '审查和测试已通过，请在「验收」页查看报告并决定。', 'label'));
+        wrapper.append(node('p', '审查和测试已通过，请在「验收」页查看报告并决定。', 'label'));
     } else {
-        card.append(node('p', '阶段运行中；需要你处理时会在上方显示阻塞任务。', 'label'));
+        wrapper.append(node('p', '阶段运行中；需要你处理时会在上方显示阻塞任务。', 'label'));
     }
-    target.append(card);
+
+    if (!tasks.length) {
+        wrapper.append(node('p', '这个阶段还没有任务。', 'label'));
+    } else {
+        for (const task of tasks) wrapper.append(taskCard(stage, task));
+    }
+    return wrapper;
+}
+
+function taskCard(stage, task) {
+    const status = text(task.status) || '未知';
+    const card = node('div', '', 'card');
+    const top = node('div', '', 'row');
+    top.append(node('strong', task.title || task.id || '未命名任务'));
+    top.append(node('span', status, ['需处理', '已取消'].includes(status) ? 'badge danger' : 'badge'));
+    const activity = node('span', '', 'activity');
+    activity.dataset.at = String(Number(task.clineActivityAt) || 0);
+    activity.title = task.clineActivityAt ? 'Cline 最近有输出' : 'Cline 暂无输出';
+    top.append(activity);
+    card.append(top);
+    if (Array.isArray(task.paths) && task.paths.length) {
+        card.append(node('p', '路径：' + task.paths.map(entry => text(entry)).join('、'), 'label'));
+    }
+    if (task.reason) card.append(node('p', '原因：' + shortReason(task.reason), 'label'));
+    card.append(node('p', '返修轮次：' + amount(Number(task.round)), 'label'));
+    const buttons = node('div', '', 'buttons');
+    buttons.append(actionButton('重试',
+        () => send('action', { action: 'retryTask', task: task.id, run: stage.id }),
+        'primary', RETRYABLE_TASKS.indexOf(status) < 0));
+    buttons.append(actionButton('取消',
+        () => send('action', { action: 'cancelTask', task: task.id, run: stage.id }),
+        'secondary', CANCELLABLE_TASKS.indexOf(status) < 0));
+    buttons.append(actionButton('回退本轮',
+        () => send('action', { action: 'rollback', task: task.id, run: stage.id }),
+        'secondary', ROLLBACK_PHASES.indexOf(text(stage.phase)) < 0));
+    buttons.append(actionButton('查看 Cline 历史',
+        () => send('openCline', { taskId: task.id, run: stage.id }), 'secondary'));
+    card.append(buttons);
+    return card;
 }
 
 function stageReviewOf(stage) {
@@ -544,72 +582,6 @@ function renderPipeline() {
     $('pipelineState').textContent = cline ? '调度：由 Cline 手动操作'
         : '调度：' + (paused ? '已暂停' : '运行中');
     $('pipelineHint').hidden = cline;
-}
-
-function renderStagePicker(list) {
-    const picker = $('stagePicker');
-    const signature = list.map(stage => text(stage.id) + '|' + text(stage.title || stage.request)).join('~');
-    if (picker.dataset.signature !== signature) {
-        const previous = picker.value;
-        picker.replaceChildren();
-        for (const stage of list) {
-            const option = node('option', (stage.title || stage.request || stage.id || '阶段') + ' · ' +
-                (stage.stageStep || stageBadgeName(stage)));
-            option.value = text(stage.id);
-            picker.append(option);
-        }
-        picker.dataset.signature = signature;
-        if (list.some(stage => text(stage.id) === previous)) picker.value = previous;
-    }
-    picker.value = selectedId;
-    $('stagePickerRow').hidden = list.length <= 1;
-}
-
-function renderTaskStatuses() {
-    const target = $('tasks');
-    if (!target) return;
-    const stage = selectedStage();
-    target.replaceChildren();
-    if (!stage) {
-        target.append(node('p', '选择阶段后显示任务。', 'label'));
-        return;
-    }
-    const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
-    if (!tasks.length) {
-        target.append(node('p', '这个阶段还没有任务。', 'label'));
-        return;
-    }
-    for (const task of tasks) {
-        const status = text(task.status) || '未知';
-        const card = node('div', '', 'card');
-        const top = node('div', '', 'row');
-        top.append(node('strong', task.title || task.id || '未命名任务'));
-        top.append(node('span', status, ['需处理', '已取消'].includes(status) ? 'badge danger' : 'badge'));
-        const activity = node('span', '', 'activity');
-        activity.dataset.at = String(Number(task.clineActivityAt) || 0);
-        activity.title = task.clineActivityAt ? 'Cline 最近有输出' : 'Cline 暂无输出';
-        top.append(activity);
-        card.append(top);
-        if (Array.isArray(task.paths) && task.paths.length) {
-            card.append(node('p', '路径：' + task.paths.map(entry => text(entry)).join('、'), 'label'));
-        }
-        if (task.reason) card.append(node('p', '原因：' + shortReason(task.reason), 'label'));
-        card.append(node('p', '返修轮次：' + amount(Number(task.round)), 'label'));
-        const buttons = node('div', '', 'buttons');
-        buttons.append(actionButton('重试',
-            () => send('action', { action: 'retryTask', task: task.id, run: stage.id }),
-            'primary', RETRYABLE_TASKS.indexOf(status) < 0));
-        buttons.append(actionButton('取消',
-            () => send('action', { action: 'cancelTask', task: task.id, run: stage.id }),
-            'secondary', CANCELLABLE_TASKS.indexOf(status) < 0));
-        buttons.append(actionButton('回退本轮',
-            () => send('action', { action: 'rollback', task: task.id, run: stage.id }),
-            'secondary', ROLLBACK_PHASES.indexOf(text(stage.phase)) < 0));
-        buttons.append(actionButton('查看 Cline 历史',
-            () => send('openCline', { taskId: task.id, run: stage.id }), 'secondary'));
-        card.append(buttons);
-        target.append(card);
-    }
 }
 
 function renderQueue() {
@@ -814,9 +786,7 @@ function render() {
         renderCline();
     } else {
         const list = stages();
-        renderStagePicker(list);
-        renderStageCard();
-        renderTaskStatuses();
+        renderStages(list);
         renderQueue();
     }
     renderAcceptance();
@@ -905,14 +875,6 @@ $('commitSnapshotSettings').onclick = commitSnapshot;
 $('refresh').onclick = () => {
     showError('');
     send('refresh');
-};
-
-$('stagePicker').onchange = () => {
-    const value = $('stagePicker').value;
-    if (!value) return;
-    selectedId = value;
-    send('selectStage', { run: selectedId });
-    render();
 };
 
 $('saveSettings').onclick = () => {

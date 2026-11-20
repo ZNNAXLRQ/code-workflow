@@ -139,9 +139,14 @@ missing(html, /依赖这些任务的工作会等待/, '已删除阻塞任务旁�
 text(html, "['已验收', '已取消'].includes", '已验收/已取消阶段从活动列表消失');
 missing(html, /action: 'resume'/, '阶段卡没有继续按钮');
 missing(html, /for \(const status of STATUSES\)/, '不再逐阶段渲染 7 个任务状态徽章');
-text(html, 'id="tasks"', '阶段任务容器恢复');
-text(html, '<h3>阶段任务</h3>', '「阶段任务」分区恢复');
-text(html, 'function renderTaskStatuses()', '任务状态列表渲染函数');
+text(html, 'id="stageCard"', '所有阶段任务容器恢复');
+missing(html, /id="stagePicker"/, '已移除阶段下拉筛选');
+text(html, '阶段与任务', '「阶段与任务」分区');
+text(html, 'function renderStages(list)', '所有阶段统一渲染');
+text(html, 'for (const stage of list) target.append(stageBlock(stage))', '所有阶段直接堆叠');
+text(html, 'function stageBlock(stage)', '同一阶段任务放在一个容器里');
+text(html, 'function taskCard(stage, task)', '任务卡渲染函数');
+text(html, 'wrapper.append(taskCard(stage, task))', '任务卡放进对应阶段容器');
 text(html, 'const status = text(task.status)', '每个任务显示自己的状态');
 text(html, 'clineActivityAt', '任务记录 Cline 最近输出时间');
 text(html, "node('span', '', 'activity')", '任务旁有 Cline 活跃呼吸灯');
@@ -192,13 +197,12 @@ ok('「暂停调度」仅出现在只读说明中');
 missing(html, /恢复调度/, '不再有「恢复调度」按钮文案');
 
 // --- 阶段 / 队列 -----------------------------------------------------------
-text(html, '<h3>当前阶段</h3>', '「当前阶段」分区');
-text(html, 'id="stageCard"', '只有一个当前阶段卡片');
-missing(html, /id="stages"/, '不再渲染阶段列表');
+text(html, '<h3>阶段与任务</h3>', '「阶段与任务」分区');
+text(html, 'id="stageCard"', '所有阶段直接堆叠在一个容器里');
+missing(html, /id="stages"/, '不再需要额外阶段列表');
 missing(html, /查看这个阶段/, '不再有阶段列表里的查看按钮');
-has(html, /\$\('stagePickerRow'\)\.hidden = list\.length <= 1/, '阶段选择器仅在多于 1 个阶段时显示');
-text(html, '<label for="stagePicker">阶段</label>', '阶段选择器标签为「阶段」');
-text(html, 'id="stagePicker"', '阶段选择器');
+missing(html, /stagePickerRow|stagePicker/, '阶段下拉筛选已移除');
+missing(html, /<label for="stagePicker">阶段<\/label>/, '阶段选择器标签已移除');
 text(html, '<h3>等待开始的请求</h3>', '队列改名「等待开始的请求」');
 text(html, '当前阶段结束后会自动开始；这些请求还没有拆成任务。', '队列说明：尚未拆成任务');
 has(html, /\$\('queueSection'\)\.hidden = !items\.length/, '队列为空时不显示');
@@ -300,7 +304,8 @@ ok('任务/验收/设置三个 tab，刷新在同一排');
 // --- 消息契约 -------------------------------------------------------------
 has(html, /send\('ready'\)/, '挂载后发送 ready');
 has(html, /send\('refresh'\)/, '刷新按钮发送 refresh');
-has(html, /send\('selectStage', \{ run:/, '阶段选择发送 selectStage');
+missing(html, /send\('selectStage', \{ run:/, '不再发送阶段选择消息');
+has(html, /send\('action', \{ action: paused \? 'stageResume' : 'stagePause', run: stage\.id \}\)/, '阶段卡发送暂停/继续切换');
 has(html, /send\('cancelQueued', \{ id: item\.id \}\)/, '取消请求发送 cancelQueued');
 has(html, /send\('action', \{ action: 'accept', run: stage\.id \}\)/, '验收 action:accept');
 has(html, /send\('action', \{ action: 'reject', run: stage\.id, text: feedback \}\)/, '退回 action:reject + 意见');
@@ -335,7 +340,7 @@ missing(html, /require\(/, '页面脚本没有 require');
 text(html, 'document.activeElement === element', '设置回填跳过正在编辑的控件');
 text(html, 'main.scrollTop = scrollTop', '重绘后恢复滚动位置');
 text(html, 'lastSignature', '按数据签名跳过重复重绘');
-text(html, 'renderStagePicker', '阶段下拉按签名复用，避免丢选择');
+missing(html, /renderStagePicker/, '阶段下拉已移除');
 
 // --- 内联脚本语法可编译 ---------------------------------------------------
 const script = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/);
