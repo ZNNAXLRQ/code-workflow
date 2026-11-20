@@ -128,7 +128,9 @@ text(html, "if (phase === '待验收') return '待验收';", '待验收阶段识
 text(html, "if (blocked.length) return '阻塞';", '有阻塞任务才归为阻塞');
 text(html, "if (tasks.length && tasks.every(task => text(task.status) === '已集成')) return '待验收';",
     '所有任务已集成时阶段自动待验收');
-text(html, "return '进行中';", '其余阶段为进行中');
+text(html, "if (tasks.length && tasks.every(task => ['排队中', '排队执行'].includes(text(task.status)))) return '排队中';",
+    '所有任务排队时阶段显示排队中');
+text(html, "return '运行中';", '其余阶段为运行中');
 text(html, 'function stageBlockedTasks(stage)', '阻塞任务识别');
 text(html, "['需处理', '已取消'].includes", '需处理/已取消任务视为阻塞');
 text(html, '阻塞任务：', '阻塞时显示卡住的任务');

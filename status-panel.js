@@ -381,12 +381,13 @@ function stageBlockedTasks(stage) {
 
 function stageDisplayState(stage) {
     const phase = text(stage.phase);
-    if (phase === '待验收') return '待验收';
     const blocked = stageBlockedTasks(stage);
     if (blocked.length) return '阻塞';
     const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
     if (tasks.length && tasks.every(task => text(task.status) === '已集成')) return '待验收';
-    return '进行中';
+    if (phase === '待验收') return '待验收';
+    if (tasks.length && tasks.every(task => ['排队中', '排队执行'].includes(text(task.status)))) return '排队中';
+    return '运行中';
 }
 
 function shortReason(value, max = 240) {
@@ -431,7 +432,7 @@ function renderStageCard() {
     } else if (state === '待验收') {
         card.append(node('p', '审查和测试已通过，请在「验收」页查看报告并决定。', 'label'));
     } else {
-        card.append(node('p', '阶段进行中；需要你处理时会在上方显示阻塞任务。', 'label'));
+        card.append(node('p', '阶段运行中；需要你处理时会在上方显示阻塞任务。', 'label'));
     }
     target.append(card);
 }
