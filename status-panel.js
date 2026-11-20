@@ -82,6 +82,9 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
 .sbadge{border:1px solid var(--vscode-panel-border);border-radius:10px;padding:1px 8px;font-size:.88em;color:var(--vscode-descriptionForeground);white-space:nowrap}
 .sbadge.on{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border-color:transparent}
 .badge{color:var(--vscode-descriptionForeground);font-size:.9em;white-space:nowrap}
+@keyframes breathe{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}
+.activity{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--vscode-descriptionForeground);opacity:.3;margin-left:auto;flex:none}
+.activity.on{background:var(--vscode-testing-iconPassed,#3fb950);animation:breathe 1.4s ease-in-out infinite}
 .badge.danger{color:var(--vscode-errorForeground);font-weight:600}
 .report{white-space:pre-wrap;word-break:break-word;border:1px solid var(--vscode-panel-border);border-radius:4px;padding:8px;background:var(--vscode-textCodeBlock-background,var(--vscode-editor-background));font-family:var(--vscode-editor-font-family,monospace);font-size:.92em;max-height:360px;overflow:auto}
 textarea{width:100%;box-sizing:border-box;min-height:54px;border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:3px;padding:4px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);font-family:inherit;margin-top:6px}
@@ -572,6 +575,10 @@ function renderTaskStatuses() {
         const top = node('div', '', 'row');
         top.append(node('strong', task.title || task.id || '未命名任务'));
         top.append(node('span', status, ['需处理', '已取消'].includes(status) ? 'badge danger' : 'badge'));
+        const activity = node('span', '', 'activity');
+        activity.dataset.at = String(Number(task.clineActivityAt) || 0);
+        activity.title = task.clineActivityAt ? 'Cline 最近有输出' : 'Cline 暂无输出';
+        top.append(activity);
         card.append(top);
         if (Array.isArray(task.paths) && task.paths.length) {
             card.append(node('p', '路径：' + task.paths.map(entry => text(entry)).join('、'), 'label'));
@@ -767,6 +774,18 @@ function renderFrontendNotice() {
     }
 }
 
+function refreshActivity() {
+    const now = Date.now();
+    for (const dot of document.querySelectorAll('.activity')) {
+        const at = Number(dot.dataset.at || 0);
+        const active = at > 0 && now - at < 30000;
+        dot.classList.toggle('on', active);
+        dot.title = active ? 'Cline 最近有输出' : 'Cline 30 秒无输出';
+    }
+}
+
+setInterval(refreshActivity, 2000);
+
 function render() {
     const main = $('main');
     const scrollTop = main.scrollTop;
@@ -818,7 +837,7 @@ function signatureOf(incoming) {
             stage.stageDshReview && [stage.stageDshReview.summary, stage.stageDshReview.candidate],
             stage.stageTest && [stage.stageTest.passed, stage.stageTest.detail],
             (Array.isArray(stage.tasks) ? stage.tasks : []).map(task =>
-                [task.id, task.title, task.status, task.round, task.reason, task.paths, task.dependsOn])
+                [task.id, task.title, task.status, task.round, task.reason, task.paths, task.dependsOn, task.clineActivityAt])
         ]),
         queue: (Array.isArray(incoming.queue) ? incoming.queue : []).map(item => [item.id, item.request]),
         archive: (Array.isArray(incoming.archive) ? incoming.archive : []).map(item => [item.id, item.title, item.archivedAt])

@@ -147,6 +147,11 @@
           "type": "string",
           "default": "",
           "description": "DSH 自审使用的 DeepSeek API key；写入后直接传给 headless DSH，不再从环境变量读取。"
+        },
+        "localWorkflow.clineTimeoutMinutes": {
+          "type": "number",
+          "default": 0,
+          "description": "Cline 任务超时分钟数；0 表示不设置超时。Cline CLI 默认也是 0（无超时）。"
         }
       }
     }

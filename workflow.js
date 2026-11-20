@@ -24,7 +24,8 @@ function run(command, args, cwd, options = {}) {
                 killer.once('close', code => { if (code && child.exitCode === null) child.kill(); });
             } else child.kill();
         };
-        const timer = setTimeout(() => { timeout = true; stop(); }, options.timeout ?? 120000);
+        const timer = options.timeout === 0 ? null :
+            setTimeout(() => { timeout = true; stop(); }, options.timeout ?? 120000);
         options.signal?.addEventListener('abort', stop, { once: true });
         const clean = () => { clearTimeout(timer); options.signal?.removeEventListener('abort', stop); };
         child.stdout.setEncoding('utf8');

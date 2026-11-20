@@ -91,7 +91,7 @@ function findSessionId(final, events) {
     return null;
 }
 
-function runTask({ cwd, prompt, clineEntry, signal, timeoutSec = 840, onLog, runtime: prepared, extraArgs = [] } = {}) {
+function runTask({ cwd, prompt, clineEntry, signal, timeoutSec = 0, onLog, runtime: prepared, extraArgs = [] } = {}) {
     if (typeof cwd !== 'string' || !cwd) return Promise.reject(new Error('runTask 需要 cwd'));
     if (typeof prompt !== 'string' || !prompt) return Promise.reject(new Error('runTask 需要 prompt'));
     let runtime;

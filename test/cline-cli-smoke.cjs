@@ -118,7 +118,7 @@ async function testSuccess() {
     assert.equal(result.events.length, 2);
     assert.deepEqual(
         JSON.parse(fs.readFileSync(successArgs, 'utf8')),
-        ['--json', '--auto-approve=true', '--timeout', '840', '--', 'smoke task']
+        ['--json', '--auto-approve=true', '--timeout', '0', '--', 'smoke task']
     );
     console.log('PASS 成功解析与参数');
 }
@@ -134,7 +134,7 @@ async function testPreparedRuntime() {
     assert.deepEqual(JSON.parse(fs.readFileSync(successArgs, 'utf8')), [
         '--data-dir', 'private-data', '--json', '--auto-approve=true',
         '--provider', 'ollama', '--model', 'local-model',
-        '--timeout', '840', '--', 'prepared task'
+        '--timeout', '0', '--', 'prepared task'
     ]);
     console.log('PASS 复用 Cline 原生 provider/data-dir');
 }

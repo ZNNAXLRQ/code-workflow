@@ -91,6 +91,7 @@ function configuration(uri) {
     const config = vscode.workspace.getConfiguration('localWorkflow', uri);
     return {
         useClineAct: config.get('useClineAct'),
+        clineTimeoutMinutes: config.get('clineTimeoutMinutes'),
         clineEntry: config.get('clineEntry'), codexExecutable: config.get('codexExecutable'),
         dshExecutable: config.get('dshExecutable'),
         dshReviewPermissionMode: config.get('dshReviewPermissionMode'),
@@ -227,7 +228,7 @@ async function reviewContext(where, data) {
     return diff || '[基线和候选之间没有文件差异]';
 }
 
-function makeAdapter(_context, config, log, session, workspace, question, relay, broker) {
+function makeAdapter(_context, config, log, session, workspace, question, relay, broker, onActivity) {
     function brokerEntry(where, data, label, taskId, stageId) {
         return {
             id: randomUUID(),
@@ -339,9 +340,10 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
 
     async function runCline(runtime, where, args, prompt, report, signal) {
             const { command, baseArgs, runtimeEnv } = runtime;
+            const timeoutSec = Math.max(0, Number(config().clineTimeoutMinutes || 0) * 60);
             const result = await run(command, [...baseArgs,
-                '--json', ...args, '--timeout', '840', '--', prompt], where, {
-                timeout: 900000, log: report, signal,
+                '--json', ...args, '--timeout', String(timeoutSec), '--', prompt], where, {
+                timeout: timeoutSec ? timeoutSec * 1000 : 0, log: report, signal,
                 env: runtimeEnv
             });
             const events = result.stdout.split(/\r?\n/).flatMap(line => {
@@ -547,6 +549,16 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
         async implement(where, prompt, report, task, signal) {
             const preferences = await modePreferences('Act');
             const privateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cline-act-'));
+            const timeoutSec = Math.max(0, Number(config().clineTimeoutMinutes || 0) * 60);
+            let lastActivity = 0;
+            const onLog = chunk => {
+                if (task) task.clineActivityAt = Date.now();
+                if (typeof onActivity === 'function' && Date.now() - lastActivity >= 1000) {
+                    lastActivity = Date.now();
+                    try { onActivity(); } catch {}
+                }
+                report(chunk);
+            };
             try {
                 const runtime = await prepareCline(privateDir);
                 const extraArgs = await nativeProviderArgs(runtime, where, preferences, signal, report);
@@ -555,8 +567,9 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
                     prompt,
                     runtime,
                     extraArgs,
+                    timeoutSec,
                     signal,
-                    onLog: report
+                    onLog
                 });
                 if (result.question !== null && result.question !== undefined) {
                     const question = String(result.question).trim();
@@ -832,7 +845,7 @@ function activate(context) {
                 }
             });
             const item = new Workflow({ repo, store, records, legacyStore: sameRoot ? oldStore : records, config, log, reviewJournal,
-                changed: () => publish().catch(() => {}), adapter: makeAdapter(context, config, log, session, folder, question, relay, reviewBroker) });
+                changed: () => publish().catch(() => {}), adapter: makeAdapter(context, config, log, session, folder, question, relay, reviewBroker, () => publish().catch(() => {})) });
             const hostBridge = new HostBridge({
                 log,
                 readTurns: threadId => readTurns({ command: config().codexExecutable, cwd: folder, threadId, limit: 10 })
