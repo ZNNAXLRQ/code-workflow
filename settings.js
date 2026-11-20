@@ -80,9 +80,10 @@ function validateField(key, value, label) {
             }
             return;
         case 'maxRepairs':
+            if (value === 'unlimited') return;
             if (!Number.isInteger(value) || value < MAX_REPAIRS_MIN || value > MAX_REPAIRS_MAX) {
-                throw new Error(where + 'maxRepairs 必须是 ' + MAX_REPAIRS_MIN + ' 到 ' + MAX_REPAIRS_MAX +
-                    ' 之间的整数，收到 ' + describe(value));
+                throw new Error(where + 'maxRepairs 必须是 0 到 ' + MAX_REPAIRS_MAX +
+                    ' 之间的整数或 unlimited，收到 ' + describe(value));
             }
             return;
         case 'useClinePlan':

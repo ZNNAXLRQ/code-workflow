@@ -51,9 +51,11 @@ main{flex:1;min-height:0;overflow:auto;padding:12px 14px 24px}
 main section{margin-bottom:16px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:space-between}
 .topline{justify-content:flex-start}
-nav{display:flex;gap:16px;margin-top:4px}
+nav{display:flex;gap:16px;margin-top:4px;align-items:center}
 nav button{border:0;border-bottom:2px solid transparent;background:none;color:var(--vscode-descriptionForeground);padding:5px 0}
 nav button[aria-selected=true]{border-bottom-color:var(--vscode-focusBorder);color:var(--vscode-foreground)}
+#refresh{margin-left:auto;color:var(--vscode-textLink-foreground);padding:5px 2px}
+.sessionLine{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;align-items:baseline}
 h3{font-size:1.05em;margin:12px 0 8px}
 h3:first-child{margin-top:0}
 h4{font-size:.98em;margin:10px 0 6px;color:var(--vscode-descriptionForeground)}
@@ -93,9 +95,16 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
     <span class="label">仓库</span>
     <span id="repo">未打开工作区</span>
   </div>
+  <div class="row sessionLine" aria-live="polite">
+    <span class="label">Codex 会话</span>
+    <span id="codexSessionName">未绑定</span>
+    <span class="label">DSH 会话</span>
+    <span id="dshSessionName">未绑定</span>
+  </div>
   <nav aria-label="面板视图">
     <button type="button" id="taskTab" aria-selected="true">任务</button>
     <button type="button" id="settingsTab" aria-selected="false">设置</button>
+    <button type="button" id="refresh" title="刷新状态">刷新</button>
   </nav>
   <p id="error" role="alert" hidden></p>
 </header>
@@ -104,10 +113,6 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
     <div class="row" id="pipelineRow">
       <span class="label" id="pipelineState" aria-live="polite">调度：运行中</span>
       <span class="label" id="pipelineHint">在 Codex 里说“暂停调度/继续调度”即可，面板不直接控制。</span>
-      <div class="buttons">
-        <button type="button" class="secondary" id="commitSnapshot" title="提交当前工作区快照（执行前扩展会弹确认）">提交快照</button>
-        <button type="button" class="secondary" id="refresh">刷新</button>
-      </div>
     </div>
     <section id="clineSection" hidden>
       <div class="notice">
@@ -156,19 +161,6 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
       <p class="label" id="queueHint">当前阶段结束后会自动开始；这些请求还没有拆成任务。</p>
       <div id="queue"></div>
     </section>
-    <section id="bindingSection">
-      <h3>Codex 会话绑定</h3>
-      <p class="label" id="boundSession">未绑定</p>
-      <p class="label" id="bindingDetail"></p>
-      <div class="field" id="bindField">
-        <label for="threadInput">会话 ID 或链接</label>
-        <input id="threadInput" type="text" spellcheck="false" placeholder="粘贴 Codex 会话 ID 或 codex://threads/… 链接">
-        <button type="button" class="primary" id="bindButton">绑定</button>
-      </div>
-      <div class="buttons" id="unbindRow">
-        <button type="button" class="secondary danger" id="unbindButton">解除绑定</button>
-      </div>
-    </section>
   </section>
   <section id="settingsPage" hidden>
     <h3>设置</h3>
@@ -185,16 +177,43 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
     </div>
     <div class="field">
       <label for="sRepairs">返修上限</label>
-      <input id="sRepairs" type="number" min="0" max="10" step="1">
-      <span class="label">0 到 10 的整数，0 表示不自动返修。</span>
+      <select id="sRepairs">
+        <option value="0">0 · 不自动返修</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
+        <option value="9">9</option>
+        <option value="10">10</option>
+        <option value="unlimited">unlimited · 无限制</option>
+      </select>
+      <span class="label">0 表示不自动返修；unlimited 表示不限制。</span>
     </div>
     <div class="field">
       <label><input id="sDshFrontend" type="checkbox"> 使用 DSH 前端（默认 Codex）</label>
     </div>
-    <div class="field">
-      <label for="sDshSessionId">DSH 会话 ID</label>
-      <input id="sDshSessionId" type="text" placeholder="会话 ID；可留空后在 DSH 中绑定" autocomplete="off">
-    </div>
+    <section id="bindingSection">
+      <h3>会话绑定</h3>
+      <div class="field">
+        <label for="sDshSessionId">DSH 会话 ID</label>
+        <input id="sDshSessionId" type="text" placeholder="会话 ID；可留空后在 DSH 中绑定" autocomplete="off">
+      </div>
+      <h4>Codex 会话</h4>
+      <p class="label" id="boundSession">未绑定</p>
+      <p class="label" id="bindingDetail"></p>
+      <div class="field" id="bindField">
+        <label for="threadInput">会话 ID 或链接</label>
+        <input id="threadInput" type="text" spellcheck="false" placeholder="粘贴 Codex 会话 ID 或 codex://threads/… 链接">
+        <button type="button" class="primary" id="bindButton">绑定</button>
+      </div>
+      <div class="buttons" id="unbindRow">
+        <button type="button" class="secondary danger" id="unbindButton">解除绑定</button>
+      </div>
+    </section>
     <div class="field">
       <label><input id="sReviewCodex" type="checkbox"> 启用 Codex 复审</label>
     </div>
@@ -514,7 +533,10 @@ function renderSettings() {
             if (Array.from($('sParallel').options).some(option => option.value === parallel)) $('sParallel').value = parallel;
         });
         keepField($('sRepairs'), () => {
-            $('sRepairs').value = Number.isFinite(Number(settings.maxRepairs)) ? Number(settings.maxRepairs) : 3;
+            const repairs = text(settings.maxRepairs);
+            const value = repairs === 'unlimited' ? 'unlimited'
+                : String(Number.isFinite(Number(repairs)) ? Number(repairs) : 3);
+            if (Array.from($('sRepairs').options).some(option => option.value === value)) $('sRepairs').value = value;
         });
         keepField($('sDshFrontend'), () => { $('sDshFrontend').checked = settings.useDshFrontend === true; });
         keepField($('sDshSessionId'), () => { $('sDshSessionId').value = text(settings.dshSessionId || ''); });
@@ -601,6 +623,18 @@ function renderCline() {
     renderClineQueue(payload.queue);
 }
 
+function renderHeaderSessions() {
+    const bound = binding();
+    const codex = (data && data.codexMetadata && (data.codexMetadata.title || data.codexMetadata.name)) ||
+        (bound && bound.codexThreadId) || (data && data.codexThreadId) || '';
+    $('codexSessionName').textContent = codex ? text(codex) : '未绑定';
+    $('codexSessionName').title = codex ? text(codex) : '';
+    const settings = data && data.settings && typeof data.settings === 'object' ? data.settings : {};
+    const dsh = (data && data.dshSessionId) || settings.dshSessionId || '';
+    $('dshSessionName').textContent = dsh ? text(dsh) : '未绑定';
+    $('dshSessionName').title = dsh ? text(dsh) : '';
+}
+
 function render() {
     const main = $('main');
     const scrollTop = main.scrollTop;
@@ -610,6 +644,7 @@ function render() {
         : data && data.folder ? text(data.folder)
             : '未打开工作区';
     $('repo').textContent = repo;
+    renderHeaderSessions();
     $('codexSection').hidden = cline;
     $('clineSection').hidden = !cline;
     $('dshNotice').hidden = !dsh;
@@ -641,6 +676,7 @@ function signatureOf(incoming) {
         frontend: incoming.frontend || 'codex',
         dshSessionId: incoming.dshSessionId || '',
         dshSessionLabel: incoming.dshSessionId || '',
+        codexTitle: incoming.codexMetadata && (incoming.codexMetadata.title || incoming.codexMetadata.name) || '',
         paused: Boolean(incoming.pipelinePaused),
         state: incoming.state && incoming.state.id,
         settings: incoming.settings,
@@ -691,7 +727,6 @@ function commitSnapshot() {
 $('taskTab').onclick = () => selectTab('tasks');
 $('settingsTab').onclick = () => selectTab('settings');
 
-$('commitSnapshot').onclick = commitSnapshot;
 $('openCline').onclick = () => {
     showError('');
     send('openCline');
@@ -716,9 +751,10 @@ $('stagePicker').onchange = () => {
 };
 
 $('saveSettings').onclick = () => {
-    const maxRepairs = Number($('sRepairs').value);
-    if (!Number.isInteger(maxRepairs) || maxRepairs < 0 || maxRepairs > 10) {
-        showError('返修上限必须是 0 到 10 之间的整数。');
+    const repairValue = $('sRepairs').value;
+    const maxRepairs = repairValue === 'unlimited' ? 'unlimited' : Number(repairValue);
+    if (maxRepairs !== 'unlimited' && (!Number.isInteger(maxRepairs) || maxRepairs < 0 || maxRepairs > 10)) {
+        showError('返修上限必须是 0 到 10 之间的整数，或选择无限制。');
         return;
     }
     showError('');

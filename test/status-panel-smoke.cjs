@@ -75,15 +75,28 @@ text(html, 'scrollMemory', '两个 tab 各自记忆滚动位置');
 text(html, 'function selectTab', 'tab 切换函数');
 ok('两个 tab 且切换不重建页面');
 
-// 绑定在任务页，设置项在设置页
+// 会话绑定和设置项都在设置页
 const tasksIndex = html.indexOf('id="tasksPage"');
 const bindingIndex = html.indexOf('id="bindingSection"');
 const settingsIndex = html.indexOf('id="settingsPage"');
 const settingsFieldIndex = html.indexOf('id="sParallel"');
-assert.ok(tasksIndex < bindingIndex && bindingIndex < settingsIndex, '绑定区必须在任务页内');
-ok('绑定区位于任务页');
+assert.ok(tasksIndex < settingsIndex && settingsIndex < bindingIndex, '绑定区必须在设置页内');
+ok('Codex/DSH 会话绑定位于设置页');
 assert.ok(settingsFieldIndex > settingsIndex, '设置项必须在设置页内');
 ok('设置项位于设置页');
+
+// 首栏仓库下方的 Codex/DSH 会话名称
+text(html, 'id="codexSessionName"', '首栏 Codex 会话名称');
+text(html, 'id="dshSessionName"', '首栏 DSH 会话名称');
+text(html, 'function renderHeaderSessions()', '首栏会话名称渲染函数');
+text(html, "const codex = (data && data.codexMetadata", 'Codex 名称优先使用 Codex 标题');
+text(html, "const dsh = (data && data.dshSessionId) || settings.dshSessionId", 'DSH 名称读取绑定 ID');
+
+// 刷新在 tab 同一排右侧
+assert.ok(html.indexOf('id="refresh"') < html.indexOf('</nav>'), '刷新按钮必须在 tab 导航行内');
+text(html, '#refresh{margin-left:auto', '刷新按钮靠右');
+missing(html, /id="commitSnapshot"/, '任务页重复的提交快照按钮已删除');
+text(html, 'id="commitSnapshotSettings"', '设置页保留提交快照按钮');
 
 // --- 7 个状态标签 ---------------------------------------------------------
 text(html, "const STATUSES = ['排队中', '规划中', '实现中', '审查中', '修复中', '待验收', '已验收'];",
@@ -158,7 +171,10 @@ for (const id of ['sParallel', 'sRepairs', 'sDshFrontend', 'sDshSessionId', 'sRe
 for (const value of ['value="1"', 'value="2"', 'value="4"', 'value="8"', 'value="unlimited"']) {
     text(html, value, '并行档位 ' + value);
 }
-text(html, 'id="sRepairs" type="number" min="0" max="10"', '返修上限 0–10 的数字输入');
+text(html, 'id="sRepairs"', '返修上限选择器');
+text(html, '<option value="unlimited">unlimited · 无限制</option>', '返修上限无限制选项');
+text(html, '返修上限必须是 0 到 10 之间的整数，或选择无限制。', '返修上限校验含无限制');
+text(html, "repairValue === 'unlimited'", '保存无限制值');
 text(html, '保存到当前项目 .local-workflow/settings.json。', '设置页写明保存位置');
 missing(html, /保存范围/, '不再有保存范围选择器');
 missing(html, /id="sScope"/, '不再有 scope 下拉');
@@ -174,14 +190,11 @@ text(html, 'initialCommit:', 'settings 字段 initialCommit');
 
 // --- 初始提交 -------------------------------------------------------------
 text(html, '阶段开始时自动提交当前工作区', 'initialCommit 复选框说明');
-text(html, 'id="commitSnapshot"', '任务页小号「提交快照」按钮');
-text(html, '提交快照', '任务页快照按钮文案');
 text(html, 'id="commitSnapshotSettings"', '设置页「提交当前工作区快照」按钮');
 text(html, '提交当前工作区快照', '设置页快照按钮文案');
 text(html, '会把当前未提交改动提交为基线；执行前扩展会弹确认。', '快照按钮旁的风险说明');
 assert.equal((html.match(/send\('initialCommit'\)/g) || []).length, 1, 'initialCommit 消息只有一处');
 ok('initialCommit 消息只发送一次（共用一套逻辑）');
-text(html, "$('commitSnapshot').onclick = commitSnapshot", '任务页快照按钮共用同一函数');
 text(html, "$('commitSnapshotSettings').onclick = commitSnapshot", '设置页快照按钮共用同一函数');
 
 // --- 绑定区 ---------------------------------------------------------------
@@ -227,8 +240,8 @@ assert.ok(!clineBody.includes('STATUSES') && !clineBody.includes('sbadge'), 'Cli
 assert.ok(!clineBody.includes('stageActions'), 'Cline 视图不渲染阶段操作');
 ok('Cline 视图无阶段卡片/7 徽章/阶段操作');
 const nav = html.slice(html.indexOf('<nav'), html.indexOf('</nav>'));
-assert.equal((nav.match(/<button\b/g) || []).length, 2, 'Cline 视图没有新增第三个 tab');
-ok('Cline 视图放在任务 tab 内，仍只有两个 tab');
+assert.equal((nav.match(/<button\b/g) || []).length, 3, 'tab 导航包含任务、设置和刷新');
+ok('Cline 视图仍只有任务/设置两个 tab，刷新在同一排');
 
 // --- 消息契约 -------------------------------------------------------------
 has(html, /send\('ready'\)/, '挂载后发送 ready');

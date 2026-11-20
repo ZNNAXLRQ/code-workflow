@@ -168,6 +168,10 @@ function validateReview(review, sha, criteria) {
     return review;
 }
 
+function repairLimit(value) {
+    return value === 'unlimited' ? Infinity : Number(value);
+}
+
 function criteriaFor(tasks) {
     return tasks.flatMap(task => task.criteria.map((description, index) => ({ id: `${task.id}/A${index + 1}`, description })));
 }
@@ -1426,7 +1430,7 @@ class Workflow {
     async repair(task, feedback) {
         if (task.feedback === feedback) throw new Error('同一问题重复，已暂停自动返修');
         task.feedback = feedback;
-        if (task.round >= this.config().maxRepairs) throw new Error('达到自动返修上限');
+        if (task.round >= repairLimit(this.config().maxRepairs)) throw new Error('达到自动返修上限');
         task.round++;
         await this.save();
     }
@@ -1449,7 +1453,7 @@ class Workflow {
                 task.status = '排队中';
                 task.round++;
                 await this.save();
-                if (task.round > this.config().maxRepairs) throw new Error('集成冲突超过返修上限');
+                if (task.round > repairLimit(this.config().maxRepairs)) throw new Error('集成冲突超过返修上限');
                 return;
             }
         }
@@ -1570,7 +1574,7 @@ class Workflow {
 
     async stageRepair(feedback, scoped) {
         const count = this.state.stageRepairs ?? 0;
-        if (count >= this.config().maxRepairs || this.state.stageFeedback === feedback) {
+        if (count >= repairLimit(this.config().maxRepairs) || this.state.stageFeedback === feedback) {
             throw new Error('阶段返修已达上限或重复：' + feedback);
         }
         this.state.stageRepairs = count + 1;

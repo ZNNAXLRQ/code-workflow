@@ -68,6 +68,7 @@ const tmpLeftovers = () => fs.readdirSync(stateDir).filter(name => name.includes
     throwsChinese(() => settings.validateSettings({ maxRepairs: -1 }), /maxRepairs 必须是/);
     throwsChinese(() => settings.validateSettings({ maxRepairs: 1.5 }), /maxRepairs 必须是/);
     throwsChinese(() => settings.validateSettings({ maxRepairs: '3' }), /maxRepairs 必须是/);
+    assert.deepEqual(settings.validateSettings({ maxRepairs: 'unlimited' }), { maxRepairs: 'unlimited' });
     throwsChinese(() => settings.validateSettings({ useDshFrontend: 'yes' }), /useDshFrontend 必须是布尔值/);
     throwsChinese(() => settings.validateSettings({ initialCommit: 1 }), /initialCommit 必须是布尔值/);
     throwsChinese(() => settings.validateSettings({ useClineAct: true }), /未知设置项 useClineAct/);
