@@ -1211,16 +1211,6 @@ class Workflow {
         if (!this.adapter.reviewBatch) return this.lane('review', async () => {
             signal.throwIfAborted();
             await onStart();
-            const settings = this.config();
-            const dshEnabled = settings.reviewDsh === true;
-            const codexEnabled = settings.reviewCodex !== false;
-            if (!dshEnabled && !codexEnabled) throw new Error('至少开启一种审查：Codex 复审或 DSH 自审。');
-            let dshReview = null;
-            if (dshEnabled) {
-                if (typeof this.adapter.selfReview !== 'function') throw new Error('DSH 自审未配置审查适配器。');
-                dshReview = await this.adapter.selfReview(where, data, label, signal);
-                if (dshReview.verdict !== 'pass' || !codexEnabled) return dshReview;
-            }
             return this.adapter.review(where, data, directory, label, signal);
         });
         return new Promise((resolve, reject) => {
@@ -1257,35 +1247,13 @@ class Workflow {
             await Promise.all(entries.filter(entry => !entry.signal.aborted).map(entry => entry.onStart()));
             check();
             controller.signal.throwIfAborted();
-            const settings = this.config();
-            const dshEnabled = settings.reviewDsh === true;
-            const codexEnabled = settings.reviewCodex !== false;
-            if (!dshEnabled && !codexEnabled) throw new Error('至少开启一种审查：Codex 复审或 DSH 自审。');
-            const codexEntries = [];
+            if (this.config().reviewCodex === false) throw new Error('Codex 复审已关闭，不能提交 Codex 审查批次。');
+            const results = await this.adapter.reviewBatch(entries, controller.signal);
             for (const entry of entries) {
-                if (entry.signal.aborted) { entry.reject(entry.signal.reason); continue; }
-                if (!dshEnabled) { codexEntries.push({ entry }); continue; }
-                if (typeof this.adapter.selfReview !== 'function') {
-                    entry.reject(new Error('DSH 自审未配置审查适配器。'));
-                    continue;
-                }
-                try {
-                    const selfReview = await this.adapter.selfReview(entry.where, entry.data, entry.label, controller.signal);
-                    if (selfReview.verdict !== 'pass' || !codexEnabled) {
-                        entry.resolve(selfReview);
-                    } else {
-                        codexEntries.push({ entry, selfReview });
-                    }
-                } catch (error) { entry.reject(error); }
-            }
-            if (!codexEnabled || !codexEntries.length) return;
-            const results = await this.adapter.reviewBatch(codexEntries.map(item => item.entry), controller.signal);
-            for (const item of codexEntries) {
-                const entry = item.entry;
                 const result = results.get(entry.id);
                 if (entry.signal.aborted) entry.reject(entry.signal.reason);
                 else if (!result || result.error) entry.reject(result?.error || new Error('这一候选提交缺少审查结果。'));
-                else entry.resolve({ ...result.review, dshReview: item.selfReview });
+                else entry.resolve(result.review);
             }
         } catch (error) {
             for (const entry of entries) entry.reject(error);
@@ -1295,6 +1263,15 @@ class Workflow {
             this.scheduleReview();
         }
     }
+    async commitDshWorktree(where, message) {
+        if (await git(where, 'status', '--porcelain', '--untracked-files=all')) {
+            await git(where, 'add', '-A', '--', '.');
+            await git(where, '-c', 'core.hooksPath=' + path.join(this.store, 'no-git-hooks'), 'commit',
+                '--no-gpg-sign', '-m', message);
+        }
+        return (await git(where, 'rev-parse', 'HEAD')).trim();
+    }
+
     async status(task, status, reason = '') {
         task.status = status;
         task.reason = reason;
@@ -1340,6 +1317,32 @@ class Workflow {
         }
         const sha = await git(task.tree, 'rev-parse', 'HEAD');
         await git(task.tree, 'merge-base', '--is-ancestor', task.base, sha);
+        let reviewedSha = sha;
+        if (this.config().reviewDsh === true) {
+            if (typeof this.adapter.selfReview !== 'function') throw new Error('DSH 自审未配置审查适配器。');
+            const criteria = criteriaFor([task]);
+            await this.status(task, '排队执行', '等待 DSH 自审');
+            const dshReview = await this.lane('dsh-review', async () => {
+                signal.throwIfAborted();
+                await this.status(task, 'DSH 自审中');
+                return this.adapter.selfReview(task.tree, {
+                    title: task.title, requirements: task.requirements, clarification: task.feedback,
+                    base: task.base, candidate: reviewedSha, criteria, test: null,
+                    testCoverage: task.testCoverage, previous: task.dshReview
+                }, task.id, signal);
+            });
+            task.dshReview = dshReview;
+            const changed = await this.commitDshWorktree(task.tree, `workflow: ${task.id} DSH self-review`);
+            task.dshReview = { ...dshReview, candidate: changed };
+            await this.save();
+            if (dshReview.verdict === 'blocked') throw new Error(dshReview.summary || 'DSH 自审阻塞');
+            if (dshReview.verdict !== 'pass') {
+                await this.repair(task, JSON.stringify((dshReview.findings || []).filter(item => item.blocking)));
+                return false;
+            }
+            reviewedSha = changed;
+            await this.save();
+        }
         await this.status(task, '排队执行', '等待测试槽');
         const test = await this.lane('test', async () => {
             signal.throwIfAborted();
@@ -1348,16 +1351,17 @@ class Workflow {
         });
         signal.throwIfAborted();
         if (await git(task.tree, 'status', '--porcelain', '--untracked-files=all') ||
-            sha !== await git(task.tree, 'rev-parse', 'HEAD')) {
+            reviewedSha !== await git(task.tree, 'rev-parse', 'HEAD')) {
             throw new Error('测试执行后候选提交或工作树发生变化，无法确认测试结果对应的版本。');
         }
         task.test = test;
         if (!test.passed) {
+            delete task.dshReview;
             await this.repair(task, '子任务测试失败：\n' + test.detail);
             return false;
         }
-        task.candidate = sha;
-        task.pendingReview = { candidate: sha, feedback: task.feedback || '' };
+        task.candidate = reviewedSha;
+        task.pendingReview = { candidate: reviewedSha, feedback: task.feedback || '' };
         return true;
     }
 
@@ -1385,12 +1389,21 @@ class Workflow {
             }
             const sha = task.candidate;
             const test = task.test;
-            await this.status(task, '排队执行', '等待 Codex 审查槽');
-            const recovered = this.reviewJournal?.take({ stageId: this.state.id, taskId: task.id, candidate: sha });
-            const review = validateReview(recovered || await this.reviewSlot(task.tree, {
-                    title: task.title, requirements: task.requirements, clarification: task.feedback,
-                    base: task.base, candidate: sha, criteria, test, testCoverage: task.testCoverage, previous: task.review
-                }, this.state.directory, task.id, signal, () => this.status(task, '审查中')), sha, criteria);
+            const codexEnabled = this.config().reviewCodex !== false;
+            await this.status(task, '排队执行', codexEnabled ? '等待 Codex 审查槽' : 'DSH 自审已通过');
+            let review;
+            if (codexEnabled) {
+                const recovered = this.reviewJournal?.take({ stageId: this.state.id, taskId: task.id, candidate: sha });
+                review = validateReview(recovered || await this.reviewSlot(task.tree, {
+                        title: task.title, requirements: task.requirements, clarification: task.feedback,
+                        base: task.base, candidate: sha, criteria, test, testCoverage: task.testCoverage, previous: task.review
+                    }, this.state.directory, task.id, signal, () => this.status(task, '审查中')), sha, criteria);
+                if (task.dshReview) review = { ...review, dshReview: task.dshReview };
+            } else {
+                if (this.config().reviewDsh !== true) throw new Error('至少开启一种审查：Codex 复审或 DSH 自审。');
+                if (!task.dshReview) throw new Error('DSH 自审结果缺失，无法完成任务审查。');
+                review = validateReview(task.dshReview, sha, criteria);
+            }
             signal.throwIfAborted();
             delete task.pendingReview;
             task.review = review;
@@ -1452,6 +1465,40 @@ class Workflow {
         await this.save();
         try {
             const where = this.state.stageTree;
+            const criteria = criteriaFor(this.state.tasks);
+            let dshReview = this.state.stageDshReview;
+            if (this.config().reviewDsh === true) {
+                if (typeof this.adapter.selfReview !== 'function') throw new Error('DSH 自审未配置审查适配器。');
+                this.state.stageStep = 'DSH 自审排队';
+                await this.save();
+                const current = await git(where, 'rev-parse', 'HEAD');
+                dshReview = await this.lane('dsh-review', async () => {
+                    controller.signal.throwIfAborted();
+                    this.state.stageStep = 'DSH 自审中';
+                    await this.save();
+                    return this.adapter.selfReview(where, {
+                        title: this.state.title, requirements: this.state.request,
+                        clarification: this.state.messages?.slice(1), base: this.state.reviewBase || this.state.base,
+                        candidate: current, criteria, test: null,
+                        plannedTasks: this.state.tasks.map(task => ({ title: task.title, requirements: task.requirements,
+                            testCoverage: task.testCoverage, candidate: task.candidate, test: task.test, review: task.review?.summary }))
+                    }, 'stage', controller.signal);
+                });
+                this.state.stageDshReview = dshReview;
+                const selfReviewed = await this.commitDshWorktree(where, 'workflow: stage DSH self-review');
+                this.state.stageHead = selfReviewed;
+                this.state.stageDshReview = { ...dshReview, candidate: selfReviewed };
+                dshReview = this.state.stageDshReview;
+                await this.save();
+                if (dshReview.verdict === 'blocked') throw new Error(dshReview.summary || 'DSH 自审阻塞');
+                if (dshReview.verdict !== 'pass') {
+                    const scoped = repairsByFile(dshReview.findings || [], this.state.tasks.flatMap(task => task.paths));
+                    await this.stageRepair(JSON.stringify((dshReview.findings || []).filter(item => item.blocking)), scoped);
+                    delete this.state.revalidating;
+                    await this.save();
+                    return;
+                }
+            }
             const test = await this.lane('test', async () => {
                 controller.signal.throwIfAborted();
                 this.state.stageStep = '测试中';
@@ -1467,19 +1514,27 @@ class Workflow {
                 await this.stageRepair('阶段测试失败：' + test.detail);
                 return;
             }
-            const criteria = criteriaFor(this.state.tasks);
-            this.state.stageStep = '审查排队';
+            const codexEnabled = this.config().reviewCodex !== false;
+            this.state.stageStep = codexEnabled ? '审查排队' : 'DSH 自审已通过';
             await this.save();
-            const recovered = this.reviewJournal?.take({ stageId: this.state.id, taskId: 'stage', candidate: sha });
-            const review = validateReview(recovered || await this.reviewSlot(where, {
-                title: this.state.title, requirements: this.state.request, clarification: this.state.messages?.slice(1),
-                base: this.state.reviewBase || this.state.base, candidate: sha, criteria, test,
-                plannedTasks: this.state.tasks.map(task => ({ title: task.title, requirements: task.requirements,
-                    testCoverage: task.testCoverage, candidate: task.candidate, test: task.test, review: task.review?.summary }))
-                }, this.state.directory, 'stage', controller.signal, async () => {
-                    this.state.stageStep = '审查中';
-                    await this.save();
-                }), sha, criteria);
+            let review;
+            if (codexEnabled) {
+                const recovered = this.reviewJournal?.take({ stageId: this.state.id, taskId: 'stage', candidate: sha });
+                review = validateReview(recovered || await this.reviewSlot(where, {
+                    title: this.state.title, requirements: this.state.request, clarification: this.state.messages?.slice(1),
+                    base: this.state.reviewBase || this.state.base, candidate: sha, criteria, test,
+                    plannedTasks: this.state.tasks.map(task => ({ title: task.title, requirements: task.requirements,
+                        testCoverage: task.testCoverage, candidate: task.candidate, test: task.test, review: task.review?.summary }))
+                    }, this.state.directory, 'stage', controller.signal, async () => {
+                        this.state.stageStep = '审查中';
+                        await this.save();
+                    }), sha, criteria);
+                if (dshReview) review = { ...review, dshReview };
+            } else {
+                if (this.config().reviewDsh !== true) throw new Error('至少开启一种审查：Codex 复审或 DSH 自审。');
+                if (!dshReview) throw new Error('DSH 自审结果缺失，无法完成阶段审查。');
+                review = validateReview(dshReview, sha, criteria);
+            }
             controller.signal.throwIfAborted();
             this.state.stageReview = review;
             if (!test.passed && review.verdict === 'pass') {

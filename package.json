@@ -69,8 +69,8 @@
         },
         "localWorkflow.dshReviewPermissionMode": {
           "type": "string",
-          "default": "workspace-write",
-          "description": "DSH 自审使用的权限预设；默认 workspace-write，自审后扩展会检查工作树未被修改。"
+          "default": "danger-full-access",
+          "description": "DSH 自审使用的权限预设；完全权限，允许它修复代码。"
         },
         "localWorkflow.dshReviewApprovalPolicy": {
           "type": "string",
@@ -79,7 +79,7 @@
             "never"
           ],
           "default": "never",
-          "description": "DSH 自审的审批策略；无人值守时用 never，自审后扩展会检查工作树。"
+          "description": "DSH 自审的审批策略；无人值守时用 never。"
         },
         "localWorkflow.dshReviewTimeoutMinutes": {
           "type": "number",

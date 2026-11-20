@@ -48,7 +48,7 @@ function resolveDshLauncher(value) {
 function reviewPrompt(where, data, label) {
     const criteria = (data.criteria || []).map(item => ({ id: item.id, description: item.description }));
     return [
-        '你是本地开发工作流的 DSH 初审。只读审查，不要修改、提交或创建文件。',
+        '你是本地开发工作流的 DSH 初审兼修复者。你有完全权限，可以读取、修改、创建、删除文件，运行命令并提交修复。',
         '仓库工作目录：' + where,
         '审查对象：' + label,
         '阶段/任务：' + (data.title || ''),
@@ -62,17 +62,18 @@ function reviewPrompt(where, data, label) {
         '历史审查：' + JSON.stringify(data.previous || null),
         '',
         '审查流程要求：',
-        '1. 如果当前工具有 goal 工具，先创建/使用目标（goal）：完整审查本次候选并完成至少两轮自审，直到没有新的阻塞问题；没有 goal 工具时也要做至少两轮自审。',
-        '2. 实际读取 diff、相关文件，并按验收标准逐项核对；不要只凭测试摘要。',
-        '3. 发现阻塞问题时给出具体文件/行为/修复方向；不要把风格偏好当阻塞。',
-        '4. 不修改代码。只有全部验收项有证据且没有阻塞问题时才 pass；pass 时 findings 必须是空数组。',
+        '1. 如果当前工具有 goal 工具，先创建/使用目标（goal）：完整审查并修复本次候选，完成至少两轮自审，直到没有新的阻塞问题；没有 goal 工具时也要做至少两轮自审。',
+        '2. 实际读取 diff、相关文件，并按验收标准逐项核对；发现阻塞问题就直接修复，并运行相关测试。',
+        '3. 你可以修改工作树、补充测试、提交修复；不要修改计划范围之外的文件，不要把风格偏好当阻塞。',
+        '4. 修复后必须复核：重新读取 diff/文件，确认阻塞问题消失，测试通过。',
         '5. 最终只输出一个 JSON 对象，不要输出其他文字：',
         '{',
         '  "verdict": "pass" | "changes_requested" | "blocked",',
         '  "summary": "一句话结论",',
         '  "criteria": [{"id": "验收项 id", "status": "met" | "unmet" | "unverified", "evidence": "证据"}],',
         '  "findings": [{"path": "src/a.js", "line": 42, "blocking": true, "problem": "问题", "evidence": "证据", "correction": "修复方向"}]',
-        '}'
+        '}',
+        'pass 时 findings 必须为空数组；只有全部验收项有证据且没有阻塞问题时才 pass。'
     ].join('\n');
 }
 
