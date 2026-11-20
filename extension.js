@@ -13,6 +13,7 @@ const { HostBridge, Outbox } = require('./transport');
 const { displayStatus, waiting, progress, retryable } = require('./state-machine');
 const { createHub, writeDiscovery, removeDiscovery } = require('./hub');
 const projectSettings = require('./settings');
+const { effortForProvider } = require('./cline-preferences');
 const bindingStore = require('./binding');
 const clineCli = require('./cline-cli');
 const { createReviewBroker } = require('./review-broker');
@@ -63,12 +64,19 @@ async function clinePreferences() {
         const provider = legacy[mode + 'ModeApiProvider'] || modeProfile?.provider || modeProfile?.providerId;
         const providerKey = provider === 'openai' && cli.providers?.['openai-compatible'] ? 'openai-compatible' : provider;
         const profile = cli.providers?.[providerKey];
+        // actModeReasoningEffort / planModeReasoningEffort are shared Cline fields.
+        // Ollama has no reasoning-effort control there; only its own provider
+        // profile can opt in, otherwise --thinking must be omitted.
+        const sharedEffort = legacy[mode + 'ModeReasoningEffort'];
+        const providerEffort = profile?.settings?.reasoning;
+        const effort = effortForProvider({
+            provider, sharedEffort, modeEffort: modeProfile?.reasoning, profileEffort: providerEffort
+        });
         return {
             provider: providerKey,
             model: (provider === 'ollama' && legacy[mode + 'ModeOllamaModelId']) ||
                 legacy[mode + 'ModeApiModelId'] || modeProfile?.model || modeProfile?.modelId || profile?.settings?.model,
-            effort: legacy[mode + 'ModeReasoningEffort'] || modeProfile?.reasoning || profile?.settings?.reasoning,
-            profile, providerFile
+            effort, profile, providerFile
         };
     }
     return {

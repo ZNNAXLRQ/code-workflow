@@ -162,6 +162,7 @@
     "media",
     "vendor",
     "dsh-session-info.js",
-    "dsh-binding.js"
+    "dsh-binding.js",
+    "cline-preferences.js"
   ]
 }
