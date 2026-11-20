@@ -74,8 +74,8 @@
         },
         "localWorkflow.dshReviewProfile": {
           "type": "string",
-          "default": "desktop",
-          "description": "DSH 自审使用的 DSH profile；应与 DSH 前端/模型凭据所在 profile 一致（默认 desktop）。"
+          "default": "headless",
+          "description": "DSH 自审使用的 DSH profile；必须是 CLI 可用的独立 profile（默认 headless），不能使用 Electron 独占的 desktop profile。"
         },
         "localWorkflow.dshReviewApprovalPolicy": {
           "type": "string",

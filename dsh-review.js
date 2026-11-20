@@ -139,7 +139,7 @@ function validateShaped(review, data) {
     return { ...review, candidate: data.candidate };
 }
 
-function runDshReview({ cwd, data, label, executable, args, profile = 'desktop', permissionMode, approvalPolicy, timeoutMs = DEFAULT_TIMEOUT_MS, signal, log = () => {} }) {
+function runDshReview({ cwd, data, label, executable, args, profile = 'headless', permissionMode, approvalPolicy, timeoutMs = DEFAULT_TIMEOUT_MS, signal, log = () => {} }) {
     const launcher = resolveDshLauncher(executable);
     const command = launcher.command;
     const commandArgs = Array.isArray(args) && args.length
@@ -152,7 +152,11 @@ function runDshReview({ cwd, data, label, executable, args, profile = 'desktop',
     return new Promise((resolve, reject) => {
         let child;
         try {
-            const env = { ...process.env, ...launcher.env };
+            const env = {
+                ...process.env,
+                ...launcher.env,
+                OLLAMA_API_KEY: process.env.OLLAMA_API_KEY || 'ollama'
+            };
             child = spawn(command, commandArgs, { cwd, windowsHide: true, env });
         } catch (error) {
             reject(new Error('无法启动 DSH：' + error.message));
