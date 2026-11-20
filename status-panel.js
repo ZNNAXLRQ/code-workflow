@@ -437,23 +437,35 @@ function stageReviewOf(stage) {
 }
 
 function acceptanceReport(stage) {
-    const review = stageReviewOf(stage);
+    const input = stage && stage.reportInput && typeof stage.reportInput === 'object' ? stage.reportInput : {
+        title: stage && (stage.title || stage.request),
+        request: stage && stage.request,
+        tasks: stage && stage.tasks,
+        test: stage && stage.stageTest,
+        review: stage && stage.stageReview,
+        dshReview: stage && stage.stageDshReview,
+        base: stage && (stage.reviewBase || stage.base),
+        head: stage && stage.stageHead
+    };
     const lines = [];
-    if (review.summary) lines.push('审查结论：' + review.summary);
-    if (Array.isArray(review.criteria) && review.criteria.length) {
-        lines.push('验收标准：');
-        for (const item of review.criteria) {
-            if (typeof item === 'string') lines.push('- ' + item);
-            else if (item && typeof item === 'object') {
-                lines.push('- ' + (item.id || item.name || '') + ' · ' + (item.status || '') +
-                    (item.evidence ? '：' + item.evidence : ''));
-            }
+    if (input.title || input.request) lines.push('阶段：' + (input.title || input.request));
+    if (input.request) lines.push('需求：' + input.request);
+    const tasks = Array.isArray(input.tasks) ? input.tasks : [];
+    if (tasks.length) {
+        lines.push('任务：');
+        for (const task of tasks) {
+            lines.push('- ' + (task.title || task.id || '未命名任务') + ' · ' + (task.status || '状态未知'));
         }
     }
-    const test = stage && stage.stageTest;
-    if (test && typeof test === 'object') {
-        lines.push('测试：' + (test.passed ? '通过' : '未通过') + (test.detail ? '\\n' + test.detail : ''));
+    if (input.test && typeof input.test === 'object') {
+        lines.push('测试：' + (input.test.passed ? '通过' : '未通过') + (input.test.detail ? '\\n' + input.test.detail : ''));
     }
+    const review = input.review || input.dshReview;
+    if (review && review.verdict) {
+        lines.push('审查：' + (review.verdict === 'pass' ? '通过' : review.verdict) +
+            (review.summary ? ' · ' + review.summary : ''));
+    }
+    if (input.base || input.head) lines.push('提交范围：' + (input.base || '?') + '..' + (input.head || '?'));
     return lines.join('\\n\\n') || '审查和测试已完成，没有附加报告。';
 }
 

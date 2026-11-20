@@ -1147,6 +1147,23 @@ function activate(context) {
             .map(worker => ({ ...worker.state, display: displayStatus(worker.state),
                 waiting: waiting(worker.state), progress: progress(worker.state), retryable: retryable(worker.state),
                 cancellable: worker.canCancelStage(),
+                reportInput: {
+                    title: worker.state.title || worker.state.request,
+                    request: worker.state.request,
+                    tasks: (worker.state.tasks || []).map(task => ({
+                        title: task.title, status: task.status, paths: task.paths,
+                        testCoverage: task.testCoverage || []
+                    })),
+                    test: worker.state.stageTest || null,
+                    review: worker.state.stageReview
+                        ? { verdict: worker.state.stageReview.verdict, summary: worker.state.stageReview.summary }
+                        : null,
+                    dshReview: worker.state.stageDshReview
+                        ? { verdict: worker.state.stageDshReview.verdict, summary: worker.state.stageDshReview.summary }
+                        : null,
+                    base: worker.state.reviewBase || worker.state.base || '',
+                    head: worker.state.stageHead || ''
+                },
                 reviewRequest: Boolean(worker.state.reviewBase || historicalReviewRequest(worker.state.request || '')) }));
         const selected = stages.find(stage => stage.id === item?.selectedStage) || stages[0];
         await view.webview.postMessage({

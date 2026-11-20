@@ -78,18 +78,17 @@ function reviewPrompt(where, data, label) {
         '历史审查：' + JSON.stringify(data.previous || null),
         '',
         '审查流程要求：',
-        '1. 第一步创建 goal（审查目标）：完整审查并修复本次候选，至少两轮自审，直到没有新的阻塞问题。没有 goal 工具时也必须完成至少两轮自审，不要停在“等待目标确认”。',
+        '1. 第一步创建 goal（审查目标）：持续自审并修复本次候选，直到你确认没有实现偏差、代码问题和潜在 bug；不限制自审轮次，不要因为“轮次够了”停止。只有工作流的返修轮次有上限，不是自审轮次。',
         '2. 实际读取 diff、相关文件，并按验收标准逐项核对；发现阻塞问题就直接修复，并运行相关测试。',
         '3. 你可以修改工作树、补充测试、提交修复；不要修改计划范围之外的文件，不要把风格偏好当阻塞。',
         '4. 修复后必须复核：重新读取 diff/文件，确认阻塞问题消失，测试通过。',
-        '5. 最终只输出一个 JSON 对象，不要输出其他文字：',
+        '5. 最终只输出一个 JSON 对象，不要输出完整审查报告；工作流只需要知道通过，或者哪里有问题：',
         '{',
         '  "verdict": "pass" | "changes_requested" | "blocked",',
-        '  "summary": "一句话结论",',
-        '  "criteria": [{"id": "验收项 id", "status": "met" | "unmet" | "unverified", "evidence": "证据"}],',
-        '  "findings": [{"path": "src/a.js", "line": 42, "blocking": true, "problem": "问题", "evidence": "证据", "correction": "修复方向"}]',
+        '  "summary": "一句话结论；有问题时写清问题",',
+        '  "findings": [{"path": "src/a.js", "line": 42, "blocking": true, "problem": "问题", "correction": "修复方向"}]',
         '}',
-        'pass 时 findings 必须为空数组；只有全部验收项有证据且没有阻塞问题时才 pass。'
+        'pass 时 findings 必须为空数组；不要返回逐项验收表或长篇报告，修改后的代码会保留并由复审直接检查。'
     ].join('\n');
     return [
         '你是本地开发工作流的 DSH 初审协调者。父会话不要创建 main goal，也不要自己直接修改代码；审查目标必须放在独立子智能体里。',
@@ -118,14 +117,10 @@ function validateShaped(review, data) {
     if (!review || !['pass', 'changes_requested', 'blocked'].includes(review.verdict)) {
         throw new Error('DSH 审查缺少合法 verdict');
     }
-    if (!Array.isArray(review.criteria) || review.criteria.length !== (data.criteria || []).length) {
-        throw new Error('DSH 审查的 criteria 数量与验收项不一致');
+    if (typeof review.summary !== 'string' || !review.summary.trim()) {
+        throw new Error('DSH 审查缺少 summary');
     }
-    for (const item of data.criteria || []) {
-        if (review.criteria.filter(result => result && result.id === item.id).length !== 1) {
-            throw new Error('DSH 审查没有逐项返回验收项：' + item.id);
-        }
-    }
+    if (review.findings === undefined) review.findings = [];
     if (!Array.isArray(review.findings)) throw new Error('DSH 审查缺少 findings');
     if (review.verdict === 'pass' && review.findings.length) {
         throw new Error('DSH 审查结论为 pass，但仍有 findings');
