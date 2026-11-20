@@ -1,0 +1,10 @@
+- insert:
+    - id: local-workflow-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: local_workflow
+        transport: stdio
+        command: 'C:\Program Files\nodejs\node.exe'
+        args: ['server.cjs']
+        cwd: 'C:\Users\ZNNAXLRQ\.codex\plugins\local-workflow-marketplace\plugins\local-workflow'
+        failOnStartupError: true

@@ -17,7 +17,8 @@ const bindingStore = require('./binding');
 const clineCli = require('./cline-cli');
 const { createReviewBroker } = require('./review-broker');
 const { ReviewJournal } = require('./review-journal');
-const clineFrontend = require('./cline-frontend');
+const dshReview = require('./dsh-review');
+const dshFrontend = require('./dsh-frontend');
 
 const suggestedModel = 'mimo-v2.6:9b-q4_K_M';
 const liveItems = new Set();
@@ -25,14 +26,6 @@ const liveItems = new Set();
 function hubStatus(item, stageId) {
     let binding = null;
     try { binding = bindingStore.readBinding(item.repo); } catch {}
-    if (item.frontend === 'cline') {
-        return {
-            repo: item.repo, frontend: 'cline', phase: 'Cline 前端',
-            pipelinePaused: false, queue: item.clineHandoff?.queue?.length || 0, archive: 0,
-            boundThread: binding?.codexThreadId || item.codexThreadId || null, binding,
-            selectedStage: null, stages: [], cline: item.clineHandoff || null
-        };
-    }
     const stages = item.stageWorkers().map(worker => ({
         id: worker.state.id, request: worker.state.request, phase: worker.state.phase,
         display: displayStatus(worker.state), waiting: waiting(worker.state),
@@ -43,10 +36,12 @@ function hubStatus(item, stageId) {
         }))
     }));
     return {
-        repo: item.repo, frontend: 'codex', phase: item.state.phase, pipelinePaused: Boolean(item.pipelinePaused),
+        repo: item.repo, frontend: item.frontend || 'codex', dshSessionId: item.dshSessionId || '',
+        phase: item.state.phase, pipelinePaused: Boolean(item.pipelinePaused),
         queue: item.queue.length, archive: item.archive.length,
         boundThread: binding?.codexThreadId || item.codexThreadId || null, binding,
-        selectedStage: stageId || item.state.id || null, stages
+        selectedStage: stageId || item.state.id || null, stages,
+        frontendHandoff: item.frontendHandoff || null
     };
 }
 
@@ -84,9 +79,16 @@ async function clinePreferences() {
 function configuration(uri) {
     const config = vscode.workspace.getConfiguration('localWorkflow', uri);
     return {
-        useClinePlan: config.get('useClinePlan'),
         useClineAct: config.get('useClineAct'),
         clineEntry: config.get('clineEntry'), codexExecutable: config.get('codexExecutable'),
+        dshExecutable: config.get('dshExecutable'),
+        dshReviewPermissionMode: config.get('dshReviewPermissionMode'),
+        dshReviewApprovalPolicy: config.get('dshReviewApprovalPolicy'),
+        dshReviewTimeoutMinutes: config.get('dshReviewTimeoutMinutes'),
+        useDshFrontend: config.get('useDshFrontend'),
+        dshSessionId: config.get('dshSessionId'),
+        reviewCodex: config.get('reviewCodex'),
+        reviewDsh: config.get('reviewDsh'),
         maxParallel: config.get('maxParallel'), maxRepairs: config.get('maxRepairs')
     };
 }
@@ -513,6 +515,27 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
             }));
             return results;
         },
+        async selfReview(where, data, label, signal) {
+            const settings = config();
+            const result = await dshReview.runDshReview({
+                cwd: where,
+                data,
+                label,
+                executable: settings.dshExecutable || dshReview.discoverDshCommand(),
+                permissionMode: settings.dshReviewPermissionMode || 'workspace-write',
+                approvalPolicy: settings.dshReviewApprovalPolicy || 'never',
+                timeoutMs: Number(settings.dshReviewTimeoutMinutes || 45) * 60 * 1000,
+                signal,
+                log
+            });
+            const status = (await git(where, 'status', '--porcelain', '--untracked-files=all')).trim();
+            if (status) throw new Error('DSH 自审修改了工作树，已拒绝该审查结果；请检查并清理后重试。');
+            if (data.candidate) {
+                const head = (await git(where, 'rev-parse', 'HEAD')).trim();
+                if (head !== data.candidate) throw new Error('DSH 自审期间候选提交发生变化，已拒绝该审查结果。');
+            }
+            return result;
+        },
         async implement(where, prompt, report, task, signal) {
             const result = await clineCli.runTask({
                 cwd: where,
@@ -559,150 +582,65 @@ function activate(context) {
             preserved.map(item => item.path).join('\n'));
     }
 
-    async function markClineHandedOff(item, ids) {
-        if (!ids || !ids.length) return;
-        const changed = clineFrontend.markHandoffRequests(item.repo, ids);
-        if (!changed) return;
-        try { item.clineHandoffState = clineFrontend.readHandoffState(item.repo); } catch {}
-        try { await publish(); }
-        catch (error) { channel.appendLine('[frontend] 刷新 Cline 交接进度失败：' + error.message); }
+    function frontendSnapshot(item, mode, dshSessionId) {
+        const stages = item.stageWorkers().map(worker => ({
+            id: worker.state.id,
+            request: worker.state.request,
+            phase: worker.state.phase,
+            display: displayStatus(worker.state),
+            stageStep: worker.state.stageStep || ''
+        }));
+        return {
+            mode,
+            dshSessionId: dshSessionId || '',
+            repo: item.repo,
+            stage: stages[0] || null,
+            stages,
+            pendingReviews: item.reviewBroker?.openBatches?.().length || 0
+        };
     }
 
-    function stopClineWatch(item) {
-        if (item.clineWatch) item.clineWatch();
-        item.clineWatch = null;
-    }
-
-    function startClineWatch(item) {
-        stopClineWatch(item);
-        item.clineWatch = clineFrontend.watchHandoff(item.repo, handoff => {
-            item.clineHandoff = handoff;
-            publish().catch(() => {});
-        }, { intervalMs: 2000 });
-        try { item.clineHandoff = clineFrontend.readHandoff(item.repo); }
-        catch (error) { item.clineHandoff = null; channel.appendLine('[frontend] ' + error.message); }
-    }
-
-    async function switchFrontend(item, mode) {
-        if (mode === 'cline') {
-            const active = item.stageWorkers().some(worker => worker.jobs.size ||
-                (worker.queue && worker.queue.length) ||
-                ['规划中', '运行中', '联合验收中', '已请求暂停'].includes(worker.state.phase));
-            if (active || item.queue.length) {
-                throw new Error('请先等当前阶段结束或取消，再切换到 Cline 前端。');
-            }
-            let handoff = clineFrontend.readHandoff(item.repo);
-            if (!handoff) {
-                handoff = clineFrontend.writeHandoff(item.repo, clineFrontend.emptyHandoff({
-                    repo: item.repo,
-                    request: item.state.request || item.queue[0]?.request || ''
-                }));
-            }
-            const cline = vscode.extensions.getExtension('saoudrizwan.claude-dev');
-            if (!cline) throw new Error('当前 VS Code 窗口未启用 Cline 扩展。');
-            await cline.activate();
-            const api = cline.exports;
-            if (!api || typeof api.startNewTask !== 'function') {
-                throw new Error('当前 Cline 扩展没有 startNewTask 接口，无法创建前端会话。');
-            }
-            const sessionId = 'cline:' + Date.now();
-            item.frontend = 'cline';
-            try { await item.outbox.holdAllHandoff(); }
-            catch (error) {
-                item.frontend = 'codex';
-                throw new Error('无法暂存待发送交接，未切换到 Cline 前端：' + error.message);
-            }
-            await api.startNewTask(clineFrontend.bootstrapPrompt({
-                repo: item.repo, request: handoff.request || item.state.request || ''
-            }));
-            await vscode.commands.executeCommand('claude-dev.SidebarProvider.focus');
-            clineFrontend.writeFrontend(item.repo, { mode: 'cline', clineSessionId: sessionId });
-            try {
-                projectSettings.updateSettings(item.repo, { useClinePlan: true }, {
-                    scope: 'folder', globalDefaults: configuration(vscode.Uri.file(item.repo))
-                });
-            } catch (error) { log('[frontend] ' + error.message); }
-            item.frontend = 'cline';
-            item.clineSessionId = sessionId;
-            item.reviewBroker?.cancelAll('切换到 Cline 前端');
-            startClineWatch(item);
-            await item.save();
-            await publish(true);
-            return;
-        }
-
-        stopClineWatch(item);
-        let handoff = null;
+    async function switchFrontend(item, mode, options = {}) {
+        if (!['codex', 'dsh'].includes(mode)) throw new Error('前端只能是 codex 或 dsh');
+        const dshSessionId = typeof options.dshSessionId === 'string'
+            ? options.dshSessionId.trim() : (item.dshSessionId || '');
         await item.outbox.load();
         try { await item.outbox.holdAllHandoff(); }
-        catch (error) {
-            startClineWatch(item);
-            throw new Error('无法暂存待发送交接消息，已保持 Cline 前端：' + error.message);
-        }
-        try { handoff = clineFrontend.readHandoff(item.repo); }
-        catch (error) {
-            startClineWatch(item);
-            throw new Error('Cline 交接文件读取失败，已保持 Cline 前端；修复后请重试：' + error.message);
-        }
-        let resolved;
-        const knownIds = new Set(Object.values(item.outbox.entries)
-            .filter(entry => entry.kind === 'handoff')
-            .flatMap(entry => entry.meta?.handoffIds || []));
-        try {
-            resolved = clineFrontend.resolveHandoffQueue(item.repo, handoff, { knownIds });
-        } catch (error) {
-            startClineWatch(item);
-            throw new Error('Cline 交接请求缺少稳定 ID，已保持 Cline 前端；请让 Cline 为 queue 项补 id 后重试：' + error.message);
-        }
-        const queue = resolved.queue;
-        const queued = new Set(knownIds);
-        const pending = queue.filter(entry => !entry.handedOff && !queued.has(entry.id));
-        item.clineHandoff = { ...(handoff || {}), queue };
-        try { await item.outbox.holdHandoff(queue.map(entry => entry.id)); }
-        catch (error) {
-            startClineWatch(item);
-            throw new Error('无法暂存待发送交接消息，已保持 Cline 前端：' + error.message);
-        }
+        catch (error) { throw new Error('无法暂存待发送交接消息，未切换前端：' + error.message); }
+        const snapshot = frontendSnapshot(item, mode, dshSessionId);
         let threadId = item.codexThreadId;
         try { threadId = bindingStore.readBinding(item.repo)?.codexThreadId || threadId; } catch {}
         let receipt = null;
-        if (threadId && handoff) {
+        if (mode === 'codex' && threadId) {
             const message = [
-                '已从 Cline 前端切回 Codex。',
-                '请读取交接文件：' + clineFrontend.handoffPath(item.repo),
-                '先同步进度；Cline 模式下没有 Codex 审查，不要把已完成的 Cline 任务重新送审。',
-                '然后清理审查队列，只规划尚未交接的 queue 请求（已交接的不要重复规划）。',
+                '已从 DSH 前端切回 Codex。',
+                '请读取前端交接：' + dshFrontend.handoffPath(item.repo),
+                '并以工作流 hub 的 workflow_status / workflow_pending_reviews 为准；不要重复规划已经完成的工作。',
                 '',
-                clineFrontend.handoffDigest({ ...handoff, queue: pending })
+                dshFrontend.handoffDigest(snapshot)
             ].join('\n');
             try {
-                receipt = await item.outbox.enqueue(threadId, message, {
-                    kind: 'handoff', hold: true, meta: { handoffIds: pending.map(entry => entry.id) }
-                });
+                receipt = await item.outbox.enqueue(threadId, message, { kind: 'handoff', hold: true });
             } catch (error) {
-                startClineWatch(item);
-                throw new Error('交接消息写入发件箱失败，已保持 Cline 前端；修复后请重试：' + error.message);
+                throw new Error('交接消息写入发件箱失败，未切换前端：' + error.message);
             }
         }
-        try { clineFrontend.writeFrontend(item.repo, { mode: 'codex' }); }
-        catch (error) {
-            startClineWatch(item);
-            throw new Error('前端模式保存失败，已保持 Cline 前端：' + error.message);
-        }
+        const frontend = dshFrontend.writeFrontend(item.repo, { mode, dshSessionId });
         try {
-            projectSettings.updateSettings(item.repo, { useClinePlan: false }, {
+            projectSettings.updateSettings(item.repo, {
+                useDshFrontend: mode === 'dsh', dshSessionId
+            }, {
                 scope: 'folder', globalDefaults: configuration(vscode.Uri.file(item.repo))
             });
         } catch (error) { log('[frontend] ' + error.message); }
-        item.frontend = 'codex';
-        item.reviewBroker?.cancelAll('切回 Codex 前端');
-        await item.outbox.releaseHeld();
-        if (receipt) {
-            const delivered = item.outbox.entries[receipt.id]?.status === 'acked';
-            if (delivered) await markClineHandedOff(item, receipt.meta?.handoffIds || []);
-            else log('[frontend] 交接消息尚未确认送达，queue 保持未交接状态');
-        } else if (handoff) {
-            vscode.window.showWarningMessage('已切回 Codex，但还没有绑定 Codex 会话；交接文件已保存，绑定后 Codex 可读取。');
+        dshFrontend.writeHandoff(item.repo, snapshot);
+        item.frontend = frontend.mode;
+        item.dshSessionId = frontend.dshSessionId;
+        item.frontendHandoff = snapshot;
+        if (mode === 'codex') await item.outbox.releaseHeld();
+        else if (receipt) log('[frontend] DSH 前端已接管，Codex 交接保留到切回时发送');
+        if (!threadId && mode === 'codex') {
+            vscode.window.showWarningMessage('已切回 Codex，但还没有绑定 Codex 会话；绑定后 Codex 可读取 hub 状态。');
         }
         await item.save();
         await publish(true);
@@ -721,7 +659,7 @@ function activate(context) {
                 let managed = {};
                 try { managed = projectSettings.readSettings(item.repo, { globalDefaults: settings }); } catch {}
                 return { ...settings, ...managed,
-                    useClinePlan: item.clineTakeover ?? managed.useClinePlan ?? settings.useClinePlan,
+                    useClinePlan: false,
                     useClineAct: item.clineAct ?? settings.useClineAct, confirmPlan: false, pipeline: true,
                     initialCommit: managed.initialCommit ?? settings.initialCommit ?? false };
             };
@@ -869,11 +807,7 @@ function activate(context) {
             });
             const outbox = new Outbox(path.join(store, 'outbox.json'), hostBridge, { log });
             outbox.canSend = entry => entry.kind !== 'handoff' || item.frontend === 'codex';
-            outbox.onAck = entry => {
-                if (entry.kind === 'handoff' && entry.meta?.handoffIds?.length) {
-                    return markClineHandedOff(item, entry.meta.handoffIds);
-                }
-            };
+            outbox.onAck = null;
             Object.assign(item, { codexSession: session, codexQuestions: questions, saveBinding, relay, hostBridge, outbox, reviewBroker });
             liveItems.add(item);
             let hub = null;
@@ -893,31 +827,27 @@ function activate(context) {
                 } catch (error) {
                     log('[binding] ' + error.message);
                 }
-                let frontend = { mode: 'codex', clineSessionId: null };
-                try { frontend = clineFrontend.readFrontend(repo); } catch (error) { log('[frontend] ' + error.message); }
+                let frontend = dshFrontend.emptyFrontend();
+                try { frontend = dshFrontend.readFrontend(repo); } catch (error) { log('[frontend] ' + error.message); }
                 loaded.frontend = frontend.mode;
-                loaded.clineSessionId = frontend.clineSessionId;
-                if (frontend.mode === 'cline') {
+                loaded.dshSessionId = frontend.dshSessionId;
+                try { loaded.frontendHandoff = dshFrontend.readHandoff(repo); } catch (error) { log('[frontend] ' + error.message); }
+                if (frontend.mode === 'dsh') {
                     await loaded.outbox.holdAllHandoff().catch(error => log('[outbox] 暂存交接消息失败：' + error.message));
                 }
                 loaded.outbox.start();
                 if (frontend.mode === 'codex') {
                     loaded.outbox.releaseHeld().catch(error => log('[outbox] 恢复待发送交接失败：' + error.message));
                 }
-                if (frontend.mode === 'cline') {
-                    startClineWatch(loaded);
-                } else {
-                    loaded.pump();
-                    loaded.retryRepositoryQuestions().catch(error => log('[规划补读] ' + error.message));
-                    if (!loaded.pipelinePaused) for (const worker of loaded.stageWorkers()) {
-                        if (worker.state.phase === '待确认方案') worker.action('approve').catch(error => log('[执行方案] ' + error.message));
-                    }
+                loaded.pump();
+                loaded.retryRepositoryQuestions().catch(error => log('[规划补读] ' + error.message));
+                if (!loaded.pipelinePaused) for (const worker of loaded.stageWorkers()) {
+                    if (worker.state.phase === '待确认方案') worker.action('approve').catch(error => log('[执行方案] ' + error.message));
                 }
                 try {
                     const ensureCodexFrontend = () => {
-                        if (loaded.frontend === 'cline') {
-                            throw Object.assign(new Error('当前是 Cline 前端模式，请先切回 Codex 再执行该操作。'),
-                                { statusCode: 409 });
+                        if (!['codex', 'dsh'].includes(loaded.frontend)) {
+                            throw Object.assign(new Error('当前前端模式不支持该操作。'), { statusCode: 409 });
                         }
                     };
                     hubToken = randomBytes(24).toString('hex');
@@ -1045,7 +975,6 @@ function activate(context) {
                             },
                             status: async payload => hubStatus(loaded, payload.stageId),
                             reviews: async () => {
-                                if (loaded.frontend === 'cline') return { batches: [] };
                                 const batches = loaded.reviewBroker.openBatches();
                                 const seen = new Set(batches.map(batch => batch.id));
                                 let journalBatches = [];
@@ -1056,6 +985,12 @@ function activate(context) {
                                 const globalDefaults = configuration(uri);
                                 if (!payload.patch) return projectSettings.readSettings(repo, { globalDefaults });
                                 const patch = projectSettings.validateSettings(payload.patch);
+                                if (patch.useDshFrontend !== undefined || patch.dshSessionId !== undefined) {
+                                    const target = (patch.useDshFrontend ?? (item.frontend === 'dsh')) ? 'dsh' : 'codex';
+                                    await switchFrontend(item, target, {
+                                        dshSessionId: patch.dshSessionId !== undefined ? patch.dshSessionId : item.dshSessionId
+                                    });
+                                }
                                 if (payload.scope === 'global') {
                                     const cfg = vscode.workspace.getConfiguration('localWorkflow', uri);
                                     for (const [key, value] of Object.entries(patch)) {
@@ -1156,15 +1091,10 @@ function activate(context) {
             let managed = {};
             try { managed = projectSettings.readSettings(item.repo, { globalDefaults: globalSettings }); } catch {}
             settings = { ...item.config(), ...managed };
-            if (item.clineTakeover !== undefined) settings.useClinePlan = item.clineTakeover;
         }
         let binding = null;
         try { if (item) binding = bindingStore.readBinding(item.repo); } catch {}
         const frontend = item?.frontend || 'codex';
-        let cline = item?.clineHandoff || null;
-        if (frontend === 'cline' && !cline && repo) {
-            try { cline = clineFrontend.readHandoff(repo); } catch {}
-        }
         if (version !== publication || !view) return;
         if (item) refreshCodexTitle(item, refreshSettings).catch(() => {});
         const question = item?.codexQuestions.values().next().value;
@@ -1175,30 +1105,10 @@ function activate(context) {
                 cancellable: worker.canCancelStage(),
                 reviewRequest: Boolean(worker.state.reviewBase || historicalReviewRequest(worker.state.request || '')) }));
         const selected = stages.find(stage => stage.id === item?.selectedStage) || stages[0];
-        if (frontend === 'cline') {
-            let clineView = cline;
-            if (cline && repo) {
-                try {
-                    const knownIds = new Set(Object.values(item?.outbox?.entries || {})
-                        .filter(entry => entry.kind === 'handoff')
-                        .flatMap(entry => entry.meta?.handoffIds || []));
-                    const resolved = clineFrontend.resolveHandoffQueue(repo, cline, { knownIds });
-                    clineView = { ...cline, queue: resolved.queue.filter(entry => !entry.handedOff) };
-                } catch {}
-            }
-            await view.webview.postMessage({
-                type: 'state', repo, folder: uri?.fsPath, frontend: 'cline', cline: clineView,
-                folders: folders().map(entry => ({ name: entry.name, path: entry.uri.fsPath })),
-                settings, refreshSettings, binding,
-                state: { id: cline?.stage?.id || 'cline', phase: 'Cline 前端', tasks: [] },
-                stages: [], pipelinePaused: false, queue: clineView?.queue || [], conversation: [],
-                codexThreadId: item?.codexThreadId || '', archive: []
-            });
-            return;
-        }
         await view.webview.postMessage({
-            type: 'state', repo, folder: uri?.fsPath, frontend: 'codex', folders: folders().map(entry => ({ name: entry.name, path: entry.uri.fsPath })),
+            type: 'state', repo, folder: uri?.fsPath, frontend, folders: folders().map(entry => ({ name: entry.name, path: entry.uri.fsPath })),
             settings, refreshSettings, state: selected || { phase: '空闲', tasks: [] }, stages, binding,
+            dshSessionId: item?.dshSessionId || '', frontendHandoff: item?.frontendHandoff || null,
             pipelinePaused: Boolean(item?.pipelinePaused),
             queue: item?.queue || [], conversation: item?.conversation || [],
             codexThreadId: item?.codexThreadId || '', chatting: Boolean(item?.chatController), canSteerChat: Boolean(item?.steerChat),
@@ -1258,19 +1168,28 @@ function activate(context) {
         }
         if (message.type === 'settings') {
             const scope = message.scope === 'global' ? 'global' : 'folder';
-            const { maxParallel, useClinePlan, useClineAct, maxRepairs, initialCommit } = message;
+            const { maxParallel, useDshFrontend, dshSessionId, reviewCodex, reviewDsh, useClineAct, maxRepairs, initialCommit } = message;
             if (useClineAct !== undefined && typeof useClineAct !== 'boolean') throw new Error('设置值无效');
+            if (useDshFrontend !== undefined && typeof useDshFrontend !== 'boolean') throw new Error('设置值无效');
+            if (reviewCodex !== undefined && typeof reviewCodex !== 'boolean') throw new Error('设置值无效');
+            if (reviewDsh !== undefined && typeof reviewDsh !== 'boolean') throw new Error('设置值无效');
+            if (dshSessionId !== undefined && typeof dshSessionId !== 'string') throw new Error('DSH 会话 ID 必须是字符串');
             const patch = {};
             if (maxParallel !== undefined) patch.maxParallel = maxParallel;
             if (maxRepairs !== undefined) patch.maxRepairs = maxRepairs;
-            if (useClinePlan !== undefined) patch.useClinePlan = useClinePlan;
+            if (useDshFrontend !== undefined) patch.useDshFrontend = useDshFrontend;
+            if (dshSessionId !== undefined) patch.dshSessionId = dshSessionId;
+            if (reviewCodex !== undefined) patch.reviewCodex = reviewCodex;
+            if (reviewDsh !== undefined) patch.reviewDsh = reviewDsh;
             if (initialCommit !== undefined) patch.initialCommit = initialCommit;
             projectSettings.validateSettings(patch);
             const repo = await rootFor(uri);
             const item = repo ? await getWorkflow(uri, repo) : undefined;
-            if (item && useClinePlan !== undefined) {
-                const target = useClinePlan ? 'cline' : 'codex';
-                if ((item.frontend === 'cline') !== useClinePlan) await switchFrontend(item, target);
+            if (item && (useDshFrontend !== undefined || dshSessionId !== undefined)) {
+                const target = (useDshFrontend ?? (item.frontend === 'dsh')) ? 'dsh' : 'codex';
+                if (item.frontend !== target || dshSessionId !== undefined) {
+                    await switchFrontend(item, target, { dshSessionId: dshSessionId ?? item.dshSessionId });
+                }
             }
             const cfg = vscode.workspace.getConfiguration('localWorkflow', uri);
             if (repo && scope === 'folder') {
@@ -1294,14 +1213,16 @@ function activate(context) {
                 for (const worker of workflow.stageWorkers()) worker.schedule();
             }
             await publish(true);
-            if (item && !useClinePlan) await item.relay.sync();
+            if (item) await item.relay?.sync();
             return;
         }
 
         const repo = await rootFor(uri);
         const item = await getWorkflow(uri, repo);
         if (message.type === 'frontend') {
-            await switchFrontend(item, message.mode === 'cline' ? 'cline' : 'codex');
+            await switchFrontend(item, message.mode === 'dsh' ? 'dsh' : 'codex', {
+                dshSessionId: typeof message.dshSessionId === 'string' ? message.dshSessionId : undefined
+            });
             return;
         }
         if (message.type === 'unbind') {

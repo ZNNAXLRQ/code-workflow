@@ -5,30 +5,161 @@
   "version": "0.5.10",
   "publisher": "local-workflow",
   "license": "UNLICENSED",
-  "engines": { "vscode": "^1.100.0" },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
   "main": "./extension.js",
-  "activationEvents": ["onView:localWorkflow.panel", "onStartupFinished"],
-  "capabilities": { "untrustedWorkspaces": { "supported": false } },
+  "activationEvents": [
+    "onView:localWorkflow.panel",
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
   "contributes": {
     "viewsContainers": {
-      "activitybar": [{ "id": "local-workflow", "title": "本地开发工作流", "icon": "media/workflow.svg" }]
+      "activitybar": [
+        {
+          "id": "local-workflow",
+          "title": "本地开发工作流",
+          "icon": "media/workflow.svg"
+        }
+      ]
     },
     "views": {
-      "local-workflow": [{ "type": "webview", "id": "localWorkflow.panel", "name": "任务", "contextualTitle": "本地开发工作流" }]
+      "local-workflow": [
+        {
+          "type": "webview",
+          "id": "localWorkflow.panel",
+          "name": "任务",
+          "contextualTitle": "本地开发工作流"
+        }
+      ]
     },
-    "commands": [{ "command": "localWorkflow.open", "title": "打开本地开发工作流" }],
+    "commands": [
+      {
+        "command": "localWorkflow.open",
+        "title": "打开本地开发工作流"
+      }
+    ],
     "configuration": {
       "title": "本地开发工作流",
       "properties": {
-        "localWorkflow.useClinePlan": { "type": "boolean", "default": false, "description": "未单独设置的项目是否默认由 Cline Plan 接管对话和规划。" },
-        "localWorkflow.useClineAct": { "type": "boolean", "default": false, "description": "未单独设置的项目是否默认使用 Cline 原生 Act 供应商和模型实现代码。" },
-        "localWorkflow.codexExecutable": { "type": "string", "default": "", "description": "可选的 Codex 可执行文件绝对路径。" },
-        "localWorkflow.clineEntry": { "type": "string", "default": "", "description": "可选的 Cline CLI JavaScript 入口绝对路径。" },
-        "localWorkflow.maxParallel": { "type": "string", "enum": ["1","2","4","8","unlimited"], "enumItemLabels": ["无并行","2","4","8","无限制"], "default": "2", "description": "本地实现者的并行上限。只有依赖就绪且写入范围互不冲突的任务才会派发。" },
-        "localWorkflow.maxRepairs": { "type": "integer", "minimum": 0, "maximum": 10, "default": 3 },
-        "localWorkflow.initialCommit": { "type": "boolean", "default": false, "description": "阶段开始时是否先提交现有工作区快照，作为实现前基线。" }
+        "localWorkflow.useClineAct": {
+          "type": "boolean",
+          "default": false,
+          "description": "未单独设置的项目是否默认使用 Cline 原生 Act 供应商和模型实现代码。"
+        },
+        "localWorkflow.codexExecutable": {
+          "type": "string",
+          "default": "",
+          "description": "可选的 Codex 可执行文件绝对路径。"
+        },
+        "localWorkflow.clineEntry": {
+          "type": "string",
+          "default": "",
+          "description": "可选的 Cline CLI JavaScript 入口绝对路径。"
+        },
+        "localWorkflow.dshExecutable": {
+          "type": "string",
+          "default": "",
+          "description": "可选的 DSH 启动器绝对路径；留空时自动查找 dsh。"
+        },
+        "localWorkflow.dshReviewPermissionMode": {
+          "type": "string",
+          "default": "workspace-write",
+          "description": "DSH 自审使用的权限预设；默认 workspace-write，自审后扩展会检查工作树未被修改。"
+        },
+        "localWorkflow.dshReviewApprovalPolicy": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "never"
+          ],
+          "default": "never",
+          "description": "DSH 自审的审批策略；无人值守时用 never，自审后扩展会检查工作树。"
+        },
+        "localWorkflow.dshReviewTimeoutMinutes": {
+          "type": "number",
+          "default": 45,
+          "minimum": 5,
+          "maximum": 720,
+          "description": "DSH 自审单次运行的最长分钟数。"
+        },
+        "localWorkflow.useDshFrontend": {
+          "type": "boolean",
+          "default": false,
+          "description": "项目默认使用 DSH 前端；关闭时使用 Codex 前端。"
+        },
+        "localWorkflow.dshSessionId": {
+          "type": "string",
+          "default": "",
+          "description": "绑定的 DSH 会话 ID，用于前端交接和状态展示。"
+        },
+        "localWorkflow.reviewCodex": {
+          "type": "boolean",
+          "default": true,
+          "description": "验收前使用 Codex 复审。"
+        },
+        "localWorkflow.reviewDsh": {
+          "type": "boolean",
+          "default": false,
+          "description": "验收前先使用 DSH 自审（goal 循环）。"
+        },
+        "localWorkflow.maxParallel": {
+          "type": "string",
+          "enum": [
+            "1",
+            "2",
+            "4",
+            "8",
+            "unlimited"
+          ],
+          "enumItemLabels": [
+            "无并行",
+            "2",
+            "4",
+            "8",
+            "无限制"
+          ],
+          "default": "2",
+          "description": "本地实现者的并行上限。只有依赖就绪且写入范围互不冲突的任务才会派发。"
+        },
+        "localWorkflow.maxRepairs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 3
+        },
+        "localWorkflow.initialCommit": {
+          "type": "boolean",
+          "default": false,
+          "description": "阶段开始时是否先提交现有工作区快照，作为实现前基线。"
+        }
       }
     }
   },
-  "files": ["extension.js", "workflow.js", "prompts.js", "panel.js", "status-panel.js", "codex-session.js", "transport.js", "state-machine.js", "hub.js", "settings.js", "binding.js", "cline-cli.js", "cline-frontend.js", "review-broker.js", "review-journal.js", "README.md", "media", "vendor"]
+  "files": [
+    "extension.js",
+    "workflow.js",
+    "prompts.js",
+    "panel.js",
+    "status-panel.js",
+    "codex-session.js",
+    "transport.js",
+    "state-machine.js",
+    "hub.js",
+    "settings.js",
+    "binding.js",
+    "cline-cli.js",
+    "dsh-frontend.js",
+    "dsh-review.js",
+    "review-broker.js",
+    "review-journal.js",
+    "README.md",
+    "media",
+    "vendor"
+  ]
 }

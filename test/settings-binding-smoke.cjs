@@ -49,7 +49,7 @@ const tmpLeftovers = () => fs.readdirSync(stateDir).filter(name => name.includes
     console.log('# 路径与导出');
 
     assert.deepEqual({ ...settings.DEFAULT_SETTINGS },
-        { maxParallel: '2', maxRepairs: 3, useClinePlan: false, initialCommit: true });
+        { maxParallel: '2', maxRepairs: 3, useDshFrontend: false, dshSessionId: '', reviewCodex: true, reviewDsh: false, initialCommit: false });
     assert.ok(Object.isFrozen(settings.DEFAULT_SETTINGS));
     assert.deepEqual([...settings.MAX_PARALLEL_VALUES], ['1', '2', '4', '8', 'unlimited']);
     assert.equal(settings.settingsPath(repo), path.join(repo, '.local-workflow', 'settings.json'));
@@ -68,24 +68,27 @@ const tmpLeftovers = () => fs.readdirSync(stateDir).filter(name => name.includes
     throwsChinese(() => settings.validateSettings({ maxRepairs: -1 }), /maxRepairs 必须是/);
     throwsChinese(() => settings.validateSettings({ maxRepairs: 1.5 }), /maxRepairs 必须是/);
     throwsChinese(() => settings.validateSettings({ maxRepairs: '3' }), /maxRepairs 必须是/);
-    throwsChinese(() => settings.validateSettings({ useClinePlan: 'yes' }), /useClinePlan 必须是布尔值/);
+    throwsChinese(() => settings.validateSettings({ useDshFrontend: 'yes' }), /useDshFrontend 必须是布尔值/);
     throwsChinese(() => settings.validateSettings({ initialCommit: 1 }), /initialCommit 必须是布尔值/);
     throwsChinese(() => settings.validateSettings({ useClineAct: true }), /未知设置项 useClineAct/);
     throwsChinese(() => settings.validateSettings(null), /设置必须是普通对象/);
     throwsChinese(() => settings.settingsPath(''), /repo 必须是非空字符串路径/);
-    assert.deepEqual(settings.validateSettings({ useClinePlan: true, initialCommit: false }),
-        { useClinePlan: true, initialCommit: false });
+    assert.deepEqual(settings.validateSettings({ useDshFrontend: true, initialCommit: false }),
+        { useDshFrontend: true, initialCommit: false });
+    throwsChinese(() => settings.validateSettings({ reviewCodex: false, reviewDsh: false }), /至少开启一种审查/);
+    assert.deepEqual(settings.validateSettings({ reviewCodex: false, reviewDsh: true }), { reviewCodex: false, reviewDsh: true });
+    assert.deepEqual(settings.validateSettings({ dshSessionId: 'session-a', reviewDsh: true }), { dshSessionId: 'session-a', reviewDsh: true });
     ok('合法补丁通过，非法值/未知键/坏参数抛中文错误');
 
     // --- 默认值合并 ---------------------------------------------------------
     console.log('# 默认值合并');
     assert.deepEqual(settings.readSettings(repo),
-        { maxParallel: '2', maxRepairs: 3, useClinePlan: false, initialCommit: true });
+        { maxParallel: '2', maxRepairs: 3, useDshFrontend: false, dshSessionId: '', reviewCodex: true, reviewDsh: false, initialCommit: false });
     assert.deepEqual(settings.readSettings(repo, { globalDefaults: { maxParallel: '4', maxRepairs: 5 } }),
-        { maxParallel: '4', maxRepairs: 5, useClinePlan: false, initialCommit: true });
+        { maxParallel: '4', maxRepairs: 5, useDshFrontend: false, dshSessionId: '', reviewCodex: true, reviewDsh: false, initialCommit: false });
     // 全局配置里混着其他键（codexExecutable 等）不影响本模块。
     assert.deepEqual(settings.readSettings(repo, { globalDefaults: { maxParallel: '8', codexExecutable: 'C:\\x.exe' } }),
-        { maxParallel: '8', maxRepairs: 3, useClinePlan: false, initialCommit: true });
+        { maxParallel: '8', maxRepairs: 3, useDshFrontend: false, dshSessionId: '', reviewCodex: true, reviewDsh: false, initialCommit: false });
     throwsChinese(() => settings.readSettings(repo, { globalDefaults: { maxRepairs: 99 } }), /maxRepairs 必须是/);
     throwsChinese(() => settings.readSettings(repo, { globalDefaults: { maxParallel: '6' } }), /maxParallel 只能是/);
     ok('无项目文件时按 globalDefaults + 默认值合并，全局非法值也抛错');
@@ -94,11 +97,11 @@ const tmpLeftovers = () => fs.readdirSync(stateDir).filter(name => name.includes
     console.log('# folder > global > 默认值');
     writeJson(settingsFile, { maxParallel: '8' });
     assert.deepEqual(settings.readSettings(repo, { globalDefaults: { maxParallel: '4', maxRepairs: 5 } }),
-        { maxParallel: '8', maxRepairs: 5, useClinePlan: false, initialCommit: true });
+        { maxParallel: '8', maxRepairs: 5, useDshFrontend: false, dshSessionId: '', reviewCodex: true, reviewDsh: false, initialCommit: false });
     assert.deepEqual(settings.resolveSettings(repo, { globalDefaults: { maxParallel: '4', maxRepairs: 5 } }),
-        { maxParallel: '8', maxRepairs: 5, useClinePlan: false, initialCommit: true });
+        { maxParallel: '8', maxRepairs: 5, useDshFrontend: false, dshSessionId: '', reviewCodex: true, reviewDsh: false, initialCommit: false });
     assert.deepEqual(settings.resolveSettings(repo, { scope: 'global', globalDefaults: { maxParallel: '4', maxRepairs: 5 } }),
-        { maxParallel: '4', maxRepairs: 5, useClinePlan: false, initialCommit: true });
+        { maxParallel: '4', maxRepairs: 5, useDshFrontend: false, dshSessionId: '', reviewCodex: true, reviewDsh: false, initialCommit: false });
     throwsChinese(() => settings.resolveSettings(repo, { scope: 'workspace' }), /scope 只能是/);
     ok('项目文件覆盖全局默认值，scope=global 忽略项目文件');
 
@@ -108,12 +111,12 @@ const tmpLeftovers = () => fs.readdirSync(stateDir).filter(name => name.includes
     const folderEffective = settings.updateSettings(repo, { maxParallel: '4' },
         { globalDefaults: { maxRepairs: 7, codexExecutable: 'C:\\x.exe' } });
     assert.deepEqual(readJson(settingsFile), { maxParallel: '4' });
-    assert.deepEqual(folderEffective, { maxParallel: '4', maxRepairs: 7, useClinePlan: false, initialCommit: true });
+    assert.deepEqual(folderEffective, { maxParallel: '4', maxRepairs: 7, useDshFrontend: false, dshSessionId: '', reviewCodex: true, reviewDsh: false, initialCommit: false });
     assert.deepEqual(settings.readSettings(repo, { globalDefaults: { maxRepairs: 7 } }), folderEffective);
     assert.deepEqual(tmpLeftovers(), []);
     // 第二次补丁应增量合并，不清掉已有键。
-    settings.updateSettings(repo, { useClinePlan: true });
-    assert.deepEqual(readJson(settingsFile), { maxParallel: '4', useClinePlan: true });
+    settings.updateSettings(repo, { useDshFrontend: true });
+    assert.deepEqual(readJson(settingsFile), { maxParallel: '4', useDshFrontend: true });
     ok('项目文件只写 patch，原子写后读回一致，无 .tmp 残留');
 
     // --- updateSettings：scope=global 不写项目文件 ---------------------------
@@ -122,7 +125,7 @@ const tmpLeftovers = () => fs.readdirSync(stateDir).filter(name => name.includes
     const globalEffective = settings.updateSettings(repo, { maxParallel: '1' },
         { scope: 'global', globalDefaults: { maxRepairs: 2 } });
     assert.equal(fs.existsSync(settingsFile), false, 'scope=global 不应创建项目设置文件');
-    assert.deepEqual(globalEffective, { maxParallel: '1', maxRepairs: 2, useClinePlan: false, initialCommit: true });
+    assert.deepEqual(globalEffective, { maxParallel: '1', maxRepairs: 2, useDshFrontend: false, dshSessionId: '', reviewCodex: true, reviewDsh: false, initialCommit: false });
     ok('scope=global 只返回合并结果，不落项目文件');
 
     // --- 损坏文件 -----------------------------------------------------------
@@ -135,7 +138,7 @@ const tmpLeftovers = () => fs.readdirSync(stateDir).filter(name => name.includes
     throwsChinese(() => settings.readSettings(repo), /格式无效/);
     fs.writeFileSync(settingsFile, JSON.stringify({ maxRepairs: 99 }), 'utf8');
     throwsChinese(() => settings.readSettings(repo), /maxRepairs 必须是/);
-    throwsChinese(() => settings.updateSettings(repo, { useClinePlan: true }), /maxRepairs 必须是/);
+    throwsChinese(() => settings.updateSettings(repo, { useDshFrontend: true }), /maxRepairs 必须是/);
     remove(settingsFile);
     ok('损坏/格式无效/字段非法的项目设置都抛错且不被覆盖');
 

@@ -33,8 +33,11 @@ const MAX_REPAIRS_MAX = 10;
 const DEFAULT_SETTINGS = Object.freeze({
     maxParallel: '2',
     maxRepairs: 3,
-    useClinePlan: false,
-    initialCommit: true
+    useDshFrontend: false,
+    dshSessionId: '',
+    reviewCodex: true,
+    reviewDsh: false,
+    initialCommit: false
 });
 
 /** 由本模块管理的设置项；其他键（如 useClineAct）不归这里管。 */
@@ -83,9 +86,17 @@ function validateField(key, value, label) {
             }
             return;
         case 'useClinePlan':
+        case 'useDshFrontend':
+        case 'reviewCodex':
+        case 'reviewDsh':
         case 'initialCommit':
             if (typeof value !== 'boolean') {
                 throw new Error(where + key + ' 必须是布尔值，收到 ' + describe(value));
+            }
+            return;
+        case 'dshSessionId':
+            if (typeof value !== 'string') {
+                throw new Error(where + 'dshSessionId 必须是字符串，收到 ' + describe(value));
             }
             return;
         default:
@@ -107,6 +118,9 @@ function validateSettings(patch) {
         }
         if (patch[key] === undefined) continue;
         validateField(key, patch[key]);
+    }
+    if (patch.reviewCodex === false && patch.reviewDsh === false) {
+        throw new Error('至少开启一种审查：Codex 复审或 DSH 自审。');
     }
     return patch;
 }
@@ -134,6 +148,13 @@ function pickSettings(value, label) {
 /** 项目的默认值基线：DEFAULT_SETTINGS 叠加 globalDefaults（只取本模块管理的键）。 */
 function baseline(globalDefaults) {
     return { ...DEFAULT_SETTINGS, ...pickSettings(globalDefaults, 'globalDefaults') };
+}
+
+function requireReviewSelection(settings, where) {
+    if (!settings.reviewCodex && !settings.reviewDsh) {
+        throw new Error(where + '至少开启一种审查：Codex 复审或 DSH 自审。');
+    }
+    return settings;
 }
 
 /**
@@ -192,7 +213,7 @@ function readSettings(repo, { globalDefaults } = {}) {
     const fileValues = raw === null
         ? {}
         : pickSettings(raw, '项目设置 ' + settingsPath(repo));
-    return { ...baseline(globalDefaults), ...fileValues };
+    return requireReviewSelection({ ...baseline(globalDefaults), ...fileValues }, '项目设置：');
 }
 
 /**
@@ -216,7 +237,7 @@ function updateSettings(repo, patch, { scope = 'folder', globalDefaults } = {}) 
     }
     const defaults = baseline(globalDefaults);
     if (scope === 'global') {
-        return { ...defaults, ...patch };
+        return requireReviewSelection({ ...defaults, ...patch }, '全局设置：');
     }
     const file = settingsPath(repo);
     const existing = readRawSettings(repo) ?? {};
@@ -224,6 +245,7 @@ function updateSettings(repo, patch, { scope = 'folder', globalDefaults } = {}) 
     const merged = { ...existing, ...patch };
     // 手改出来的非法值可能在合并后仍然存在，写盘前必须拦住，避免固化坏配置。
     const mergedKnown = pickSettings(merged, '项目设置 ' + file);
+    requireReviewSelection({ ...defaults, ...mergedKnown }, '项目设置：');
     writeJsonAtomic(file, merged);
     return { ...defaults, ...mergedKnown };
 }
@@ -239,7 +261,7 @@ function updateSettings(repo, patch, { scope = 'folder', globalDefaults } = {}) 
 function resolveSettings(repo, { globalDefaults, scope = 'folder' } = {}) {
     // 即使 scope=global 也校验 repo，尽早暴露调用方的路径错误。
     repositoryRoot(repo);
-    if (scope === 'global') return baseline(globalDefaults);
+    if (scope === 'global') return requireReviewSelection(baseline(globalDefaults), '全局设置：');
     if (scope !== 'folder') {
         throw new Error("scope 只能是 'folder' 或 'global'，收到 " + describe(scope));
     }

@@ -1211,6 +1211,16 @@ class Workflow {
         if (!this.adapter.reviewBatch) return this.lane('review', async () => {
             signal.throwIfAborted();
             await onStart();
+            const settings = this.config();
+            const dshEnabled = settings.reviewDsh === true;
+            const codexEnabled = settings.reviewCodex !== false;
+            if (!dshEnabled && !codexEnabled) throw new Error('至少开启一种审查：Codex 复审或 DSH 自审。');
+            let dshReview = null;
+            if (dshEnabled) {
+                if (typeof this.adapter.selfReview !== 'function') throw new Error('DSH 自审未配置审查适配器。');
+                dshReview = await this.adapter.selfReview(where, data, label, signal);
+                if (dshReview.verdict !== 'pass' || !codexEnabled) return dshReview;
+            }
             return this.adapter.review(where, data, directory, label, signal);
         });
         return new Promise((resolve, reject) => {
@@ -1247,12 +1257,35 @@ class Workflow {
             await Promise.all(entries.filter(entry => !entry.signal.aborted).map(entry => entry.onStart()));
             check();
             controller.signal.throwIfAborted();
-            const results = await this.adapter.reviewBatch(entries, controller.signal);
+            const settings = this.config();
+            const dshEnabled = settings.reviewDsh === true;
+            const codexEnabled = settings.reviewCodex !== false;
+            if (!dshEnabled && !codexEnabled) throw new Error('至少开启一种审查：Codex 复审或 DSH 自审。');
+            const codexEntries = [];
             for (const entry of entries) {
+                if (entry.signal.aborted) { entry.reject(entry.signal.reason); continue; }
+                if (!dshEnabled) { codexEntries.push({ entry }); continue; }
+                if (typeof this.adapter.selfReview !== 'function') {
+                    entry.reject(new Error('DSH 自审未配置审查适配器。'));
+                    continue;
+                }
+                try {
+                    const selfReview = await this.adapter.selfReview(entry.where, entry.data, entry.label, controller.signal);
+                    if (selfReview.verdict !== 'pass' || !codexEnabled) {
+                        entry.resolve(selfReview);
+                    } else {
+                        codexEntries.push({ entry, selfReview });
+                    }
+                } catch (error) { entry.reject(error); }
+            }
+            if (!codexEnabled || !codexEntries.length) return;
+            const results = await this.adapter.reviewBatch(codexEntries.map(item => item.entry), controller.signal);
+            for (const item of codexEntries) {
+                const entry = item.entry;
                 const result = results.get(entry.id);
                 if (entry.signal.aborted) entry.reject(entry.signal.reason);
                 else if (!result || result.error) entry.reject(result?.error || new Error('这一候选提交缺少审查结果。'));
-                else entry.resolve(result.review);
+                else entry.resolve({ ...result.review, dshReview: item.selfReview });
             }
         } catch (error) {
             for (const entry of entries) entry.reject(error);

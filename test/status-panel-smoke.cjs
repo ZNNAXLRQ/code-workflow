@@ -149,11 +149,10 @@ assert.equal((html.match(/\$\('repo'\)\.textContent =/g) || []).length, 1, '路�
 ok('路径只由一个元素渲染');
 text(html, 'data.repo ? text(data.repo)', '有 repo 时显示 repo');
 text(html, 'data && data.folder ? text(data.folder)', '无 repo 时回退 workspace 路径');
-text(html, 'clinePayload().repo ? text(clinePayload().repo) :', 'Cline 模式可回退 cline.repo');
 text(html, ": '未打开工作区';", '都没有时显示未打开工作区');
 
 // --- 设置项（仅项目局部） -------------------------------------------------
-for (const id of ['sParallel', 'sRepairs', 'sClinePlan', 'sInitialCommit', 'saveSettings']) {
+for (const id of ['sParallel', 'sRepairs', 'sDshFrontend', 'sDshSessionId', 'sReviewCodex', 'sReviewDsh', 'sInitialCommit', 'saveSettings']) {
     text(html, 'id="' + id + '"', '设置控件 ' + id);
 }
 for (const value of ['value="1"', 'value="2"', 'value="4"', 'value="8"', 'value="unlimited"']) {
@@ -167,7 +166,10 @@ missing(html, /value="global"|'global'/, 'UI 不再提供全局范围');
 has(html, /scope: 'folder'/, 'settings 消息固定 scope=folder');
 text(html, 'maxParallel:', 'settings 字段 maxParallel');
 text(html, 'maxRepairs:', 'settings 字段 maxRepairs');
-text(html, 'useClinePlan:', 'settings 字段 useClinePlan');
+text(html, 'useDshFrontend:', 'settings 字段 useDshFrontend');
+text(html, 'dshSessionId:', 'settings 字段 dshSessionId');
+text(html, 'reviewCodex:', 'settings 字段 reviewCodex');
+text(html, 'reviewDsh:', 'settings 字段 reviewDsh');
 text(html, 'initialCommit:', 'settings 字段 initialCommit');
 
 // --- 初始提交 -------------------------------------------------------------
@@ -215,8 +217,10 @@ text(html, "data.frontend === 'cline'", 'frontend 缺省时按 codex 处理');
 text(html, "$('codexSection').hidden = cline", 'Cline 模式隐藏阶段/任务区');
 text(html, "$('clineSection').hidden = !cline", '非 Cline 模式隐藏 Cline 区');
 text(html, '调度：由 Cline 手动操作', 'Cline 模式调度只读文案');
-text(html, '启用 Cline 前端模式（Codex 没额度时）', 'useClinePlan 复选框新文案');
-missing(html, /由 Cline Plan 接管规划/, '旧的 useClinePlan 文案已移除');
+text(html, '使用 DSH 前端（默认 Codex）', 'useDshFrontend 复选框新文案');
+text(html, '启用 DSH 自审（goal 循环，作为初审）', 'reviewDsh 复选框');
+text(html, '启用 Codex 复审', 'reviewCodex 复选框');
+missing(html, /启用 Cline 前端模式/, '旧的 Cline 前端复选框已移除');
 text(html, "if (cline) {", 'render 按 frontend 分支渲染');
 const clineBody = html.slice(html.indexOf('function renderClineTasks'), html.indexOf('function render()'));
 assert.ok(!clineBody.includes('STATUSES') && !clineBody.includes('sbadge'), 'Cline 视图不渲染 7 徽章');

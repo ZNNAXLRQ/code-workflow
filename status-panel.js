@@ -136,6 +136,11 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
       </div>
     </section>
     <section id="codexSection">
+      <div class="notice" id="dshNotice" hidden>
+        <strong>DSH 前端模式</strong>
+        <p class="label" id="dshSessionLabel"></p>
+        <p class="label">规划和审查通过 DSH 的 local_workflow MCP 工具完成；本面板只负责状态、设置和验收。</p>
+      </div>
       <p class="label" id="glossary">阶段 = 一次完整开发（规划 → 实现 → 测试 → 审查 → 验收）；任务 = 阶段内拆分出的可并行工作项。</p>
       <div class="field" id="stagePickerRow" hidden>
         <label for="stagePicker">阶段</label>
@@ -184,7 +189,17 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
       <span class="label">0 到 10 的整数，0 表示不自动返修。</span>
     </div>
     <div class="field">
-      <label><input id="sClinePlan" type="checkbox"> 启用 Cline 前端模式（Codex 没额度时）</label>
+      <label><input id="sDshFrontend" type="checkbox"> 使用 DSH 前端（默认 Codex）</label>
+    </div>
+    <div class="field">
+      <label for="sDshSessionId">DSH 会话 ID</label>
+      <input id="sDshSessionId" type="text" placeholder="会话 ID；可留空后在 DSH 中绑定" autocomplete="off">
+    </div>
+    <div class="field">
+      <label><input id="sReviewCodex" type="checkbox"> 启用 Codex 复审</label>
+    </div>
+    <div class="field">
+      <label><input id="sReviewDsh" type="checkbox"> 启用 DSH 自审（goal 循环，作为初审）</label>
     </div>
     <div class="field">
       <label><input id="sInitialCommit" type="checkbox"> 阶段开始时自动提交当前工作区</label>
@@ -501,7 +516,10 @@ function renderSettings() {
         keepField($('sRepairs'), () => {
             $('sRepairs').value = Number.isFinite(Number(settings.maxRepairs)) ? Number(settings.maxRepairs) : 3;
         });
-        keepField($('sClinePlan'), () => { $('sClinePlan').checked = settings.useClinePlan === true; });
+        keepField($('sDshFrontend'), () => { $('sDshFrontend').checked = settings.useDshFrontend === true; });
+        keepField($('sDshSessionId'), () => { $('sDshSessionId').value = text(settings.dshSessionId || ''); });
+        keepField($('sReviewCodex'), () => { $('sReviewCodex').checked = settings.reviewCodex !== false; });
+        keepField($('sReviewDsh'), () => { $('sReviewDsh').checked = settings.reviewDsh === true; });
         keepField($('sInitialCommit'), () => { $('sInitialCommit').checked = settings.initialCommit === true; });
         settingsFolder = folder;
     }
@@ -510,7 +528,10 @@ function renderSettings() {
     $('commitSnapshotSettings').disabled = !ready;
     $('sParallel').disabled = !ready;
     $('sRepairs').disabled = !ready;
-    $('sClinePlan').disabled = !ready;
+    $('sDshFrontend').disabled = !ready;
+    $('sDshSessionId').disabled = !ready;
+    $('sReviewCodex').disabled = !ready;
+    $('sReviewDsh').disabled = !ready;
     $('sInitialCommit').disabled = !ready;
     $('settingsHint').textContent = ready ? '' : '打开受信任的本地 Git 项目后才能保存设置。';
 }
@@ -584,12 +605,19 @@ function render() {
     const main = $('main');
     const scrollTop = main.scrollTop;
     const cline = clineMode();
+    const dsh = Boolean(data && data.frontend === 'dsh');
     const repo = data && data.repo ? text(data.repo)
         : data && data.folder ? text(data.folder)
-            : data && clinePayload().repo ? text(clinePayload().repo) : '未打开工作区';
+            : '未打开工作区';
     $('repo').textContent = repo;
     $('codexSection').hidden = cline;
     $('clineSection').hidden = !cline;
+    $('dshNotice').hidden = !dsh;
+    if (dsh) {
+        $('dshSessionLabel').textContent = data.dshSessionId
+            ? '会话 ID：' + text(data.dshSessionId)
+            : '未绑定 DSH 会话 ID；可在设置中填写。';
+    }
     renderPipeline();
     if (cline) {
         $('queueSection').hidden = true;
@@ -607,12 +635,12 @@ function render() {
 }
 
 function signatureOf(incoming) {
-    const cline = incoming.frontend === 'cline';
     return JSON.stringify({
         folder: incoming.folder,
         repo: incoming.repo,
-        frontend: cline ? 'cline' : 'codex',
-        cline: cline ? incoming.cline : null,
+        frontend: incoming.frontend || 'codex',
+        dshSessionId: incoming.dshSessionId || '',
+        dshSessionLabel: incoming.dshSessionId || '',
         paused: Boolean(incoming.pipelinePaused),
         state: incoming.state && incoming.state.id,
         settings: incoming.settings,
@@ -698,7 +726,10 @@ $('saveSettings').onclick = () => {
         scope: 'folder',
         maxParallel: $('sParallel').value,
         maxRepairs: maxRepairs,
-        useClinePlan: $('sClinePlan').checked,
+        useDshFrontend: $('sDshFrontend').checked,
+        dshSessionId: $('sDshSessionId').value.trim(),
+        reviewCodex: $('sReviewCodex').checked,
+        reviewDsh: $('sReviewDsh').checked,
         initialCommit: $('sInitialCommit').checked
     });
 };
