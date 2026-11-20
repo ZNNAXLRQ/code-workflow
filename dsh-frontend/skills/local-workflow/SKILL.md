@@ -18,16 +18,20 @@ description: DSH 前端的本地开发工作流。用户要求实现/修复功�
 `.local-workflow/frontend-handoff.json`，先读取它同步前端交接状态，再以
 `workflow_status` 的实时结果为准。
 
+## 适用范围
+
+只有在当前 DSH 会话已绑定到本地工作流仓库（仓库有 `.local-workflow/dsh-binding.json` 且 hub 可连），或用户明确要求使用 local-workflow 时才走工作流。没有连接仓库的普通 DSH 会话不要调用这些工具，也不要强制规划。
+
 ## 实现请求
 
 1. 只读检查仓库结构、相关源码、测试和约定；不要直接改业务代码。
 2. 拆成可独立执行的小任务，每项提供 `id`、`title`、`description`、`files`、
    `dependsOn`、`acceptance`、可选 `testCoverage` 和 `testCommand`。顶层必须
    有仓库级 `testCommand`。
-3. 如果用户还在讨论或只是描述目标：只读检查并讨论，不要提前派发。
-4. 如果用户经过讨论后明确说“按这个计划实施 / 开始 / 确认 / 派发”：把这句话视为**最终确认**——先调用 `submit_plan` 生成任务拆分，成功后立即用返回的 `planId` 调用 `confirm_plan`，**不再二次询问**。
-5. 如果用户只是问方案、没有说开始：调用 `submit_plan` 暂存，说明任务拆分并问一次“确认开始实施吗？”；用户明确确认后才调用 `confirm_plan`。用户说再改、先别开始或只是讨论时不要确认；需要时调用 `discard_plan`。
-6. 如果已经有 pending plan，用户说“开始实施 / 确认 / 按这个计划执行”时直接确认该 `planId`，不要重新规划，也不要二次询问。
+3. 用户还在讨论、描述目标，或只是说“我要删除 / 我要实现 / 改成这样”：这只是**需求**，不是确认；只能只读检查、讨论，或调用 `submit_plan` 暂存方案，**不要 confirm**。
+4. 如果没有 pending plan：调用 `submit_plan` 暂存后，必须把任务拆分和 `planId` 展示给用户，然后停下来等确认。
+5. 只有用户在**已经看到当前方案后**说“可以开始 / 开始吧 / 行 / 按这个来 / 确认 / 按这个计划实施 / 派发”等明确肯定语句，才算最终确认；此时直接调用 `confirm_plan`，不再二次询问。绝不能把最初的“我现在要删除 / 我要实现”推断成确认。
+6. 如果已经有 pending plan，用户在看到方案后说上述肯定语句时直接确认该 `planId`，不要重新规划，也不要二次询问。
 7. 唯一例外：`submit_plan` 返回 `initialCommit: true` 且 `dirtyCount > 0` 时，先告诉用户会先提交 `dirtyCount` 个未提交文件作为基线，等用户明确决定；计划校验失败也停下来报告。
 8. 提交成功后等待，不要自己开始改代码；实现由 Cline 执行。
 
