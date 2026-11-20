@@ -335,7 +335,8 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
             const { command, baseArgs, runtimeEnv } = runtime;
             const timeoutSec = 0;
             const result = await run(command, [...baseArgs,
-                '--json', ...args, '--timeout', String(timeoutSec), '--', prompt], where, {
+                '--json', ...args,
+                ...(timeoutSec > 0 ? ['--timeout', String(timeoutSec)] : []), '--', prompt], where, {
                 timeout: timeoutSec ? timeoutSec * 1000 : 0, log: report, signal,
                 env: runtimeEnv
             });
@@ -831,7 +832,8 @@ function activate(context) {
                         '以下候选提交已完成实现和测试，请审查：',
                         'batchId: ' + batch.id,
                         lines.join('\n\n'),
-                        '请用原生工具核对仓库；完成后调用 submit_review_batch，batchId 原样返回，按提交 ID 逐项给出结论。'
+                        '请用原生工具核对仓库；完成后调用 submit_review_batch，batchId 原样返回，按提交 ID 逐项给出结论。',
+                        '结论必须自洽：任一验收项不是 met，或存在任何 finding，verdict 必须是 changes_requested，不能 pass；pass 时 findings 必须为空。'
                     ].join('\n\n');
                     await item.outbox.enqueue(threadId, message, { kind: 'review' });
                 }

@@ -56,6 +56,7 @@ description: DSH 前端的本地开发工作流。用户要求实现/修复功�
 3. 子智能体完成后，把结果写到
    `<repo>/.local-workflow/dsh-self-review/results/<id>.json`：
    `{ "id": "...", "verdict": "pass|changes_requested|blocked", "summary": "...", "findings": [], "candidate": "..." }`；
+   结论必须自洽：任一验收项不是 met，或存在任何 finding，`verdict` 必须是 `changes_requested`，不能 `pass`；`pass` 时 `findings` 必须为空。
 4. 删除对应 request 文件；工作流会自动读取结果继续。
 5. 进度显示在主会话的子智能体列表里；不要使用 headless 自审。
 

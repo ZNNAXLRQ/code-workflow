@@ -154,7 +154,7 @@ function runTask({ cwd, prompt, clineEntry, signal, timeoutSec = 0, onLog, runti
                 '--json',
                 '--auto-approve=true',
                 ...extraArgs,
-                '--timeout', String(timeoutSec),
+                ...(Number(timeoutSec) > 0 ? ['--timeout', String(timeoutSec)] : []),
                 '--', prompt
             ], {
                 cwd,
