@@ -630,9 +630,10 @@ function renderHeaderSessions() {
     $('codexSessionName').textContent = codex ? text(codex) : '未绑定';
     $('codexSessionName').title = codex ? text(codex) : '';
     const settings = data && data.settings && typeof data.settings === 'object' ? data.settings : {};
-    const dsh = (data && data.dshSessionId) || settings.dshSessionId || '';
-    $('dshSessionName').textContent = dsh ? text(dsh) : '未绑定';
-    $('dshSessionName').title = dsh ? text(dsh) : '';
+    const dshId = (data && data.dshSessionId) || settings.dshSessionId || '';
+    const dshTitle = (data && data.dshSessionTitle) || '';
+    $('dshSessionName').textContent = dshTitle || (dshId ? text(dshId) : '未绑定');
+    $('dshSessionName').title = dshId ? text(dshTitle ? dshTitle + ' · ' + dshId : dshId) : '';
 }
 
 function render() {
@@ -650,7 +651,7 @@ function render() {
     $('dshNotice').hidden = !dsh;
     if (dsh) {
         $('dshSessionLabel').textContent = data.dshSessionId
-            ? '会话 ID：' + text(data.dshSessionId)
+            ? ('会话：' + (data.dshSessionTitle || '未命名') + ' · ' + text(data.dshSessionId))
             : '未绑定 DSH 会话 ID；可在设置中填写。';
     }
     renderPipeline();
@@ -675,7 +676,7 @@ function signatureOf(incoming) {
         repo: incoming.repo,
         frontend: incoming.frontend || 'codex',
         dshSessionId: incoming.dshSessionId || '',
-        dshSessionLabel: incoming.dshSessionId || '',
+        dshSessionTitle: incoming.dshSessionTitle || '',
         codexTitle: incoming.codexMetadata && (incoming.codexMetadata.title || incoming.codexMetadata.name) || '',
         paused: Boolean(incoming.pipelinePaused),
         state: incoming.state && incoming.state.id,

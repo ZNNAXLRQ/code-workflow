@@ -90,7 +90,8 @@ text(html, 'id="codexSessionName"', '首栏 Codex 会话名称');
 text(html, 'id="dshSessionName"', '首栏 DSH 会话名称');
 text(html, 'function renderHeaderSessions()', '首栏会话名称渲染函数');
 text(html, "const codex = (data && data.codexMetadata", 'Codex 名称优先使用 Codex 标题');
-text(html, "const dsh = (data && data.dshSessionId) || settings.dshSessionId", 'DSH 名称读取绑定 ID');
+text(html, "const dshId = (data && data.dshSessionId) || settings.dshSessionId", 'DSH 名称读取绑定 ID');
+text(html, "const dshTitle = (data && data.dshSessionTitle) || ''", 'DSH 名称读取会话标题');
 
 // 刷新在 tab 同一排右侧
 assert.ok(html.indexOf('id="refresh"') < html.indexOf('</nav>'), '刷新按钮必须在 tab 导航行内');

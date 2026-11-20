@@ -160,6 +160,7 @@
     "review-journal.js",
     "README.md",
     "media",
-    "vendor"
+    "vendor",
+    "dsh-session-info.js"
   ]
 }

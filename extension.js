@@ -19,6 +19,7 @@ const { createReviewBroker } = require('./review-broker');
 const { ReviewJournal } = require('./review-journal');
 const dshReview = require('./dsh-review');
 const dshFrontend = require('./dsh-frontend');
+const dshSessionInfo = require('./dsh-session-info');
 
 const suggestedModel = 'mimo-v2.6:9b-q4_K_M';
 const liveItems = new Set();
@@ -37,6 +38,7 @@ function hubStatus(item, stageId) {
     }));
     return {
         repo: item.repo, frontend: item.frontend || 'codex', dshSessionId: item.dshSessionId || '',
+        dshSessionTitle: item.dshSessionTitle || '',
         phase: item.state.phase, pipelinePaused: Boolean(item.pipelinePaused),
         queue: item.queue.length, archive: item.archive.length,
         boundThread: binding?.codexThreadId || item.codexThreadId || null, binding,
@@ -629,6 +631,8 @@ function activate(context) {
         dshFrontend.writeHandoff(item.repo, snapshot);
         item.frontend = frontend.mode;
         item.dshSessionId = frontend.dshSessionId;
+        try { item.dshSessionTitle = dshSessionInfo.readDshSessionInfo(frontend.dshSessionId)?.title || ''; }
+        catch { item.dshSessionTitle = ''; }
         item.frontendHandoff = snapshot;
         if (mode === 'codex') await item.outbox.releaseHeld();
         else if (receipt) log('[frontend] DSH 前端已接管，Codex 交接保留到切回时发送');
@@ -824,6 +828,8 @@ function activate(context) {
                 try { frontend = dshFrontend.readFrontend(repo); } catch (error) { log('[frontend] ' + error.message); }
                 loaded.frontend = frontend.mode;
                 loaded.dshSessionId = frontend.dshSessionId;
+                try { loaded.dshSessionTitle = dshSessionInfo.readDshSessionInfo(frontend.dshSessionId)?.title || ''; }
+                catch { loaded.dshSessionTitle = ''; }
                 try { loaded.frontendHandoff = dshFrontend.readHandoff(repo); } catch (error) { log('[frontend] ' + error.message); }
                 if (frontend.mode === 'dsh') {
                     await loaded.outbox.holdAllHandoff().catch(error => log('[outbox] 暂存交接消息失败：' + error.message));
@@ -1088,6 +1094,8 @@ function activate(context) {
         let binding = null;
         try { if (item) binding = bindingStore.readBinding(item.repo); } catch {}
         const frontend = item?.frontend || 'codex';
+        let dshSessionTitle = item?.dshSessionTitle || '';
+        try { dshSessionTitle = dshSessionInfo.readDshSessionInfo(item?.dshSessionId)?.title || dshSessionTitle; } catch {}
         if (version !== publication || !view) return;
         if (item) refreshCodexTitle(item, refreshSettings).catch(() => {});
         const question = item?.codexQuestions.values().next().value;
@@ -1101,7 +1109,7 @@ function activate(context) {
         await view.webview.postMessage({
             type: 'state', repo, folder: uri?.fsPath, frontend, folders: folders().map(entry => ({ name: entry.name, path: entry.uri.fsPath })),
             settings, refreshSettings, state: selected || { phase: '空闲', tasks: [] }, stages, binding,
-            dshSessionId: item?.dshSessionId || '', frontendHandoff: item?.frontendHandoff || null,
+            dshSessionId: item?.dshSessionId || '', dshSessionTitle, frontendHandoff: item?.frontendHandoff || null,
             pipelinePaused: Boolean(item?.pipelinePaused),
             queue: item?.queue || [], conversation: item?.conversation || [],
             codexThreadId: item?.codexThreadId || '', chatting: Boolean(item?.chatController), canSteerChat: Boolean(item?.steerChat),
