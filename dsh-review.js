@@ -16,15 +16,33 @@ const path = require('node:path');
 const DEFAULT_TIMEOUT_MS = 45 * 60 * 1000;
 
 function discoverDshCommand() {
-    if (process.env.DSH_NODE_EXECUTABLE) {
-        const candidate = path.join(path.dirname(process.env.DSH_NODE_EXECUTABLE),
-            'resources', 'runtime', 'cli', 'bin', 'dsh.cmd');
-        if (fs.existsSync(candidate)) return candidate;
+    if (process.env.DSH_NODE_EXECUTABLE && fs.existsSync(process.env.DSH_NODE_EXECUTABLE)) {
+        return process.env.DSH_NODE_EXECUTABLE;
     }
     const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
-    const common = path.join(programFiles, 'DeepseekHarness', 'resources', 'runtime', 'cli', 'bin', 'dsh.cmd');
+    const common = path.join(programFiles, 'DeepseekHarness', 'DeepSeek Harness.exe');
     if (fs.existsSync(common)) return common;
     return 'dsh';
+}
+
+function dshCliPath(executable) {
+    return path.join(path.dirname(executable), 'resources', 'app.asar', 'dsh', 'node_modules',
+        '@deepseek-ai', 'dsh-desktop-host', 'lib', 'cli.js');
+}
+
+function resolveDshLauncher(value) {
+    let executable = typeof value === 'string' && value.trim() ? value.trim() : discoverDshCommand();
+    if (/\.cmd$/i.test(executable)) {
+        executable = path.resolve(path.dirname(executable), '..', '..', '..', '..', 'DeepSeek Harness.exe');
+    }
+    if (/DeepSeek Harness\.exe$/i.test(executable)) {
+        return {
+            command: executable,
+            prefix: ['--expose-internals', dshCliPath(executable)],
+            env: { ELECTRON_RUN_AS_NODE: '1' }
+        };
+    }
+    return { command: executable, prefix: [], env: {} };
 }
 
 function reviewPrompt(where, data, label) {
@@ -100,10 +118,11 @@ function validateShaped(review, data) {
 }
 
 function runDshReview({ cwd, data, label, executable, args, permissionMode, approvalPolicy, timeoutMs = DEFAULT_TIMEOUT_MS, signal, log = () => {} }) {
-    const command = executable || discoverDshCommand();
+    const launcher = resolveDshLauncher(executable);
+    const command = launcher.command;
     const commandArgs = Array.isArray(args) && args.length
         ? args
-        : ['--profile', 'headless',
+        : [...launcher.prefix, '--profile', 'headless',
             ...(permissionMode ? ['--permission-mode', permissionMode] : []),
             ...(approvalPolicy ? ['--approval-policy', approvalPolicy] : []),
             '--json', '-'];
@@ -111,17 +130,8 @@ function runDshReview({ cwd, data, label, executable, args, permissionMode, appr
     return new Promise((resolve, reject) => {
         let child;
         try {
-            const env = { ...process.env };
-            delete env.ELECTRON_RUN_AS_NODE;
-            if (process.platform === 'win32' && /\.cmd$/i.test(command)) {
-                const line = [command, ...commandArgs]
-                    .map(argument => '"' + String(argument).replace(/"/g, '""') + '"').join(' ');
-                child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', line], {
-                    cwd, windowsHide: true, env
-                });
-            } else {
-                child = spawn(command, commandArgs, { cwd, windowsHide: true, env });
-            }
+            const env = { ...process.env, ...launcher.env };
+            child = spawn(command, commandArgs, { cwd, windowsHide: true, env });
         } catch (error) {
             reject(new Error('无法启动 DSH：' + error.message));
             return;
@@ -197,4 +207,4 @@ function runDshReview({ cwd, data, label, executable, args, permissionMode, appr
     });
 }
 
-module.exports = { discoverDshCommand, reviewPrompt, extractJson, validateShaped, runDshReview };
+module.exports = { discoverDshCommand, resolveDshLauncher, reviewPrompt, extractJson, validateShaped, runDshReview };
