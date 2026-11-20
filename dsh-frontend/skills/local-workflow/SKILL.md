@@ -57,7 +57,7 @@ description: DSH 前端的本地开发工作流。用户要求实现/修复功�
    `<repo>/.local-workflow/dsh-self-review/results/<id>.json`：
    `{ "id": "...", "verdict": "pass|changes_requested|blocked", "summary": "...", "findings": [], "candidate": "..." }`；
 4. 删除对应 request 文件；工作流会自动读取结果继续。
-5. 进度显示在主会话的子智能体列表里；只有主会话不可用时才走 headless fallback。
+5. 进度显示在主会话的子智能体列表里；不要使用 headless 自审。
 
 不要在主会话里直接改工作树来代替子智能体审查；审查由子智能体完成。
 

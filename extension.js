@@ -18,7 +18,6 @@ const bindingStore = require('./binding');
 const clineCli = require('./cline-cli');
 const { createReviewBroker } = require('./review-broker');
 const { ReviewJournal } = require('./review-journal');
-const dshReview = require('./dsh-review');
 const dshSelfReview = require('./dsh-self-review');
 const dshFrontend = require('./dsh-frontend');
 const dshSessionInfo = require('./dsh-session-info');
@@ -92,18 +91,9 @@ function configuration(uri) {
     const config = vscode.workspace.getConfiguration('localWorkflow', uri);
     return {
         useClineAct: config.get('useClineAct'),
-        clineTimeoutMinutes: config.get('clineTimeoutMinutes'),
         clineEntry: config.get('clineEntry'), codexExecutable: config.get('codexExecutable'),
-        dshExecutable: config.get('dshExecutable'),
-        dshReviewPermissionMode: config.get('dshReviewPermissionMode'),
-        dshReviewApprovalPolicy: config.get('dshReviewApprovalPolicy'),
-        dshReviewProfile: config.get('dshReviewProfile'),
-        dshReviewMode: config.get('dshReviewMode'),
-        dshReviewFallback: config.get('dshReviewFallback'),
-        dshReviewApiKey: config.get('dshReviewApiKey'),
-        dshReviewTimeoutMinutes: config.get('dshReviewTimeoutMinutes'),
-        useDshFrontend: config.get('useDshFrontend'),
         dshSessionId: config.get('dshSessionId'),
+        useDshFrontend: config.get('useDshFrontend'),
         reviewCodex: config.get('reviewCodex'),
         reviewDsh: config.get('reviewDsh'),
         maxParallel: config.get('maxParallel'), maxRepairs: config.get('maxRepairs')
@@ -343,7 +333,7 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
 
     async function runCline(runtime, where, args, prompt, report, signal) {
             const { command, baseArgs, runtimeEnv } = runtime;
-            const timeoutSec = Math.max(0, Number(config().clineTimeoutMinutes || 0) * 60);
+            const timeoutSec = 0;
             const result = await run(command, [...baseArgs,
                 '--json', ...args, '--timeout', String(timeoutSec), '--', prompt], where, {
                 timeout: timeoutSec ? timeoutSec * 1000 : 0, log: report, signal,
@@ -534,34 +524,12 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
             return results;
         },
         async selfReview(where, data, label, signal) {
-            const settings = config();
-            const timeoutMs = Number(settings.dshReviewTimeoutMinutes || 30) * 60 * 1000;
-            if ((settings.dshReviewMode || 'main') !== 'headless') {
-                try {
-                    return await dshSelfReview.runMainReview({
-                        repo: workspace,
-                        where,
-                        data,
-                        label,
-                        timeoutMs,
-                        signal,
-                        log
-                    });
-                } catch (error) {
-                    log('[dsh-self-review] 主会话自审未完成：' + error.message);
-                    if ((settings.dshReviewFallback || 'headless') !== 'headless') throw error;
-                }
-            }
-            return dshReview.runDshReview({
-                cwd: where,
+            return dshSelfReview.runMainReview({
+                repo: workspace,
+                where,
                 data,
                 label,
-                executable: settings.dshExecutable || dshReview.discoverDshCommand(),
-                profile: settings.dshReviewProfile || 'headless',
-                apiKey: settings.dshReviewApiKey || '',
-                permissionMode: settings.dshReviewPermissionMode || 'danger-full-access',
-                approvalPolicy: settings.dshReviewApprovalPolicy || 'never',
-                timeoutMs: Number(settings.dshReviewTimeoutMinutes || 45) * 60 * 1000,
+                timeoutMs: 0,
                 signal,
                 log
             });
@@ -569,7 +537,7 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
         async implement(where, prompt, report, task, signal) {
             const preferences = await modePreferences('Act');
             const privateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cline-act-'));
-            const timeoutSec = Math.max(0, Number(config().clineTimeoutMinutes || 0) * 60);
+            const timeoutSec = 0;
             let lastActivity = 0;
             const onLog = chunk => {
                 if (task) task.clineActivityAt = Date.now();
