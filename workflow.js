@@ -946,6 +946,10 @@ class Workflow {
                 task.status = '排队中';
                 task.reason = '';
                 task.round = 0;
+                delete task.review;
+                delete task.dshReview;
+                delete task.pendingReview;
+                delete task.test;
                 if (phase === '需处理') {
                     this.state.phase = '运行中';
                     this.state.message = '';
