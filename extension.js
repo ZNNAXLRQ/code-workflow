@@ -35,25 +35,7 @@ function hubStatus(item, stageId) {
         stageStep: worker.state.stageStep || '', tasks: (worker.state.tasks || []).map(task => ({
             id: task.id, title: task.title, status: task.status, paths: task.paths,
             reason: task.reason || '', round: task.round || 0
-        })),
-        reportInput: {
-            title: worker.state.title || worker.state.request,
-            request: worker.state.request,
-            tasks: (worker.state.tasks || []).map(task => ({
-                title: task.title, status: task.status, paths: task.paths,
-                testCoverage: task.testCoverage || []
-            })),
-            test: worker.state.stageTest || null,
-            review: worker.state.stageReview
-                ? { verdict: worker.state.stageReview.verdict, summary: worker.state.stageReview.summary }
-                : null,
-            dshReview: worker.state.stageDshReview
-                ? { verdict: worker.state.stageDshReview.verdict, summary: worker.state.stageDshReview.summary }
-                : null,
-            base: worker.state.reviewBase || worker.state.base || '',
-            head: worker.state.stageHead || ''
-        },
-        stageReport: worker.state.stageReport || null
+        }))
     }));
     return {
         repo: item.repo, frontend: item.frontend || 'codex', dshSessionId: item.dshSessionId || '',
@@ -1030,28 +1012,6 @@ function activate(context) {
                                 return { stageId: worker.state.id, taskId: payload.taskId };
                             },
                             status: async payload => hubStatus(loaded, payload.stageId),
-                            report: async payload => {
-                                const text = String(payload.report || '').trim();
-                                if (!text) throw Object.assign(new Error('阶段报告不能为空'), { statusCode: 400 });
-                                let worker = payload.stageId ? loaded.stageWorker(payload.stageId) : null;
-                                if (!worker) {
-                                    const waiting = loaded.stageWorkers().filter(candidate =>
-                                        candidate.state.phase === '待验收');
-                                    if (waiting.length === 1) worker = waiting[0];
-                                }
-                                if (!worker) throw Object.assign(new Error('找不到等待验收的阶段'), { statusCode: 404 });
-                                if (worker.state.phase !== '待验收') {
-                                    throw Object.assign(new Error('只有待验收阶段才能提交阶段报告'), { statusCode: 409 });
-                                }
-                                worker.state.stageReport = {
-                                    text,
-                                    author: String(payload.author || 'frontend'),
-                                    candidate: worker.state.stageHead || '',
-                                    generatedAt: new Date().toISOString()
-                                };
-                                await worker.save();
-                                return { stageId: worker.state.id, length: text.length };
-                            },
                             reviews: async () => {
                                 const batches = loaded.reviewBroker.openBatches();
                                 const seen = new Set(batches.map(batch => batch.id));
@@ -1187,23 +1147,6 @@ function activate(context) {
             .map(worker => ({ ...worker.state, display: displayStatus(worker.state),
                 waiting: waiting(worker.state), progress: progress(worker.state), retryable: retryable(worker.state),
                 cancellable: worker.canCancelStage(),
-                reportInput: {
-                    title: worker.state.title || worker.state.request,
-                    request: worker.state.request,
-                    tasks: (worker.state.tasks || []).map(task => ({
-                        title: task.title, status: task.status, paths: task.paths,
-                        testCoverage: task.testCoverage || []
-                    })),
-                    test: worker.state.stageTest || null,
-                    review: worker.state.stageReview
-                        ? { verdict: worker.state.stageReview.verdict, summary: worker.state.stageReview.summary }
-                        : null,
-                    dshReview: worker.state.stageDshReview
-                        ? { verdict: worker.state.stageDshReview.verdict, summary: worker.state.stageDshReview.summary }
-                        : null,
-                    base: worker.state.reviewBase || worker.state.base || '',
-                    head: worker.state.stageHead || ''
-                },
                 reviewRequest: Boolean(worker.state.reviewBase || historicalReviewRequest(worker.state.request || '')) }));
         const selected = stages.find(stage => stage.id === item?.selectedStage) || stages[0];
         await view.webview.postMessage({

@@ -437,9 +437,35 @@ function stageReviewOf(stage) {
 }
 
 function acceptanceReport(stage) {
-    const report = stage && stage.stageReport;
-    if (report && typeof report.text === 'string' && report.text.trim()) return report.text;
-    return '等待 DSH/Codex 前端生成阶段报告。';
+    const review = (stage && stage.stageReview && typeof stage.stageReview === 'object' && stage.stageReview) ||
+        (stage && stage.stageDshReview && typeof stage.stageDshReview === 'object' && stage.stageDshReview) || {};
+    const lines = [];
+    if (review.verdict) lines.push('审查结论：' + (review.verdict === 'pass' ? '通过' : review.verdict));
+    if (review.summary) lines.push(review.summary);
+    if (Array.isArray(review.criteria) && review.criteria.length) {
+        lines.push('验收标准：');
+        for (const item of review.criteria) {
+            if (typeof item === 'string') lines.push('- ' + item);
+            else if (item && typeof item === 'object') {
+                lines.push('- ' + (item.id || item.name || '') + ' · ' + (item.status || '') +
+                    (item.evidence ? '：' + item.evidence : ''));
+            }
+        }
+    }
+    if (Array.isArray(review.findings) && review.findings.length) {
+        lines.push('问题：');
+        for (const finding of review.findings) {
+            if (finding && finding.blocking) {
+                lines.push('- ' + (finding.path || '') + '：' + (finding.problem || '') +
+                    (finding.correction ? '（修复方向：' + finding.correction + '）' : ''));
+            }
+        }
+    }
+    const test = stage && stage.stageTest;
+    if (test && typeof test === 'object') {
+        lines.push('测试：' + (test.passed ? '通过' : '未通过') + (test.detail ? '\\n' + test.detail : ''));
+    }
+    return lines.join('\\n\\n') || '审查和测试已完成，没有附加报告。';
 }
 
 function renderAcceptance() {
@@ -464,7 +490,7 @@ function renderAcceptance() {
             buttons.append(actionButton('验收', () => {
                 showError('');
                 send('action', { action: 'accept', run: stage.id });
-            }, 'primary', !(stage.stageReport && stage.stageReport.text)));
+            }, 'primary'));
             buttons.append(actionButton('退回', () => {
                 const feedback = reason.value.trim();
                 if (!feedback) {

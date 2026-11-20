@@ -65,24 +65,16 @@ description: DSH 前端的本地开发工作流。用户要求实现/修复功�
 调用 `workflow_answer`，传 `repo`、`taskId` 和 `answer`。不能回答的产品取舍、
 权限或外部信息先问用户；不要把猜测当确定答案。
 
-## 阶段验收报告（DSH 前端生成）
-
-- 阶段进入 `待验收` 后，`workflow_status` 返回的 `stage.reportInput` 是工作流给 DSH 前端的报告输入。
-- 你负责根据它生成 Markdown 阶段报告：阶段名、需求、任务、测试、审查结论、提交范围；不需要完整审查报告。
-- 用 `workflow_stage_report` 提交报告，传 `repo`、`stageId`、`report`、`author: 'dsh'`。
-- 提交后把报告展示给用户。用户可以在这里直接验收：明确说“验收/通过”时，可以调用 `workflow_accept`；也可以由用户在 VS Code 验收 tab 点验收。
-- 提交报告不等于验收；不要自行验收，必须等用户明确决定。两边任一处验收后，工作流和验收 tab 会同步。
-
 ## 验收、取消、纠偏
 
-- 只有用户明确说“验收/可以结束”才调用 `workflow_accept`，传 `repo` 和
-  `stageId`。不要因审查通过就自行验收。
+- 验收只在 VS Code 插件的验收 tab 完成；审查报告由工作流直接提供给 tab，不需要前端再生成报告。
+- 不要调用 `workflow_accept`，也不要自行验收；等用户在 tab 决定。
 - 取消/停止用 `workflow_cancel`；暂停新任务用 `workflow_pause`，继续用
   `workflow_resume`；调整方向用 `workflow_steer`。
 - 查看/修改设置用 `workflow_settings`；只有用户明确要求时修改。
-- 取消、验收等操作前先用 `workflow_status` 确认目标阶段。
+- 取消等操作前先用 `workflow_status` 确认目标阶段。
 
 ## 回复风格
 
-自然、简洁，像协作。对用户说“计划已暂存”“审查意见已发回”“已验收”等结果；
+自然、简洁，像协作。对用户说“计划已暂存”“审查意见已发回”“阶段待验收”等结果；
 不要暴露内部 hub、token、HTTP、MCP 原始 JSON，除非用户明确询问技术细节。
