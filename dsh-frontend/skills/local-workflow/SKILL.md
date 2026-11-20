@@ -37,15 +37,29 @@ description: DSH 前端的本地开发工作流。用户要求实现/修复功�
 
 ## 审查
 
-审查由调度器执行，不在这个前端会话里手工提交批次：
+审查由调度器执行，不在这个前端会话里手工提交审查批次：
 
 - 只开 Codex 复审：调度器把候选批次发给 Codex；
-- 只开 DSH 自审：调度器用 DSH headless + goal 自审，通过后直接待验收；
+- 只开 DSH 自审：调度器等待主会话子智能体审查并修复，通过后直接待验收；
 - 两个都开：先 DSH 自审，再 Codex 复审；两者都通过才能验收。
 
 因此**不要调用 `submit_review` 或 `submit_review_batch`** 去开启一个调度器不会
-消费的手工批次。DSH 自审由调度器用 DSH headless 直接审查并修复代码；它有
-完全权限，可以修改工作树、补测试和提交。
+消费的手工批次。
+
+### 主会话自审请求
+
+当用户要求自审，或阶段处于 `DSH 自审中` 时：
+
+1. 扫描 `<repo>/.local-workflow/dsh-self-review/requests/*.json`；
+2. 对每个请求，用 `subagent` 创建审查子智能体，把 `request.data` 作为任务交给它；
+   子智能体创建 goal，审查并修复，直到没有实现偏差、代码问题和潜在 bug；
+3. 子智能体完成后，把结果写到
+   `<repo>/.local-workflow/dsh-self-review/results/<id>.json`：
+   `{ "id": "...", "verdict": "pass|changes_requested|blocked", "summary": "...", "findings": [], "candidate": "..." }`；
+4. 删除对应 request 文件；工作流会自动读取结果继续。
+5. 进度显示在主会话的子智能体列表里；只有主会话不可用时才走 headless fallback。
+
+不要在主会话里直接改工作树来代替子智能体审查；审查由子智能体完成。
 
 你所在的 DSH 前端也有完全权限。用户明确要求你修改代码时可以直接修改；但
 工作流当前阶段的 Cline 工作树由调度器管理，修改前先用 `workflow_status`

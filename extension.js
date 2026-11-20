@@ -19,6 +19,7 @@ const clineCli = require('./cline-cli');
 const { createReviewBroker } = require('./review-broker');
 const { ReviewJournal } = require('./review-journal');
 const dshReview = require('./dsh-review');
+const dshSelfReview = require('./dsh-self-review');
 const dshFrontend = require('./dsh-frontend');
 const dshSessionInfo = require('./dsh-session-info');
 const dshBinding = require('./dsh-binding');
@@ -97,6 +98,8 @@ function configuration(uri) {
         dshReviewPermissionMode: config.get('dshReviewPermissionMode'),
         dshReviewApprovalPolicy: config.get('dshReviewApprovalPolicy'),
         dshReviewProfile: config.get('dshReviewProfile'),
+        dshReviewMode: config.get('dshReviewMode'),
+        dshReviewFallback: config.get('dshReviewFallback'),
         dshReviewApiKey: config.get('dshReviewApiKey'),
         dshReviewTimeoutMinutes: config.get('dshReviewTimeoutMinutes'),
         useDshFrontend: config.get('useDshFrontend'),
@@ -532,6 +535,23 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
         },
         async selfReview(where, data, label, signal) {
             const settings = config();
+            const timeoutMs = Number(settings.dshReviewTimeoutMinutes || 30) * 60 * 1000;
+            if ((settings.dshReviewMode || 'main') !== 'headless') {
+                try {
+                    return await dshSelfReview.runMainReview({
+                        repo: workspace,
+                        where,
+                        data,
+                        label,
+                        timeoutMs,
+                        signal,
+                        log
+                    });
+                } catch (error) {
+                    log('[dsh-self-review] 主会话自审未完成：' + error.message);
+                    if ((settings.dshReviewFallback || 'headless') !== 'headless') throw error;
+                }
+            }
             return dshReview.runDshReview({
                 cwd: where,
                 data,

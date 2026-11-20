@@ -152,6 +152,24 @@
           "type": "number",
           "default": 0,
           "description": "Cline 任务超时分钟数；0 表示不设置超时。Cline CLI 默认也是 0（无超时）。"
+        },
+        "localWorkflow.dshReviewMode": {
+          "type": "string",
+          "enum": [
+            "main",
+            "headless"
+          ],
+          "default": "main",
+          "description": "DSH 自审模式：main 使用主会话子智能体（可见、复用上下文），headless 使用独立 CLI。"
+        },
+        "localWorkflow.dshReviewFallback": {
+          "type": "string",
+          "enum": [
+            "headless",
+            "none"
+          ],
+          "default": "headless",
+          "description": "主会话自审超时/不可用时是否回退 headless。"
         }
       }
     }
@@ -178,6 +196,7 @@
     "vendor",
     "dsh-session-info.js",
     "dsh-binding.js",
-    "cline-preferences.js"
+    "cline-preferences.js",
+    "dsh-self-review.js"
   ]
 }
