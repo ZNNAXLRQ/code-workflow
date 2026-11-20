@@ -82,6 +82,9 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
 .sbadge{border:1px solid var(--vscode-panel-border);border-radius:10px;padding:1px 8px;font-size:.88em;color:var(--vscode-descriptionForeground);white-space:nowrap}
 .sbadge.on{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border-color:transparent}
 .badge{color:var(--vscode-descriptionForeground);font-size:.9em;white-space:nowrap}
+.badge.danger{color:var(--vscode-errorForeground);font-weight:600}
+.report{white-space:pre-wrap;word-break:break-word;border:1px solid var(--vscode-panel-border);border-radius:4px;padding:8px;background:var(--vscode-textCodeBlock-background,var(--vscode-editor-background));font-family:var(--vscode-editor-font-family,monospace);font-size:.92em;max-height:360px;overflow:auto}
+textarea{width:100%;box-sizing:border-box;min-height:54px;border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:3px;padding:4px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);font-family:inherit;margin-top:6px}
 .buttons{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .notice{border:1px solid var(--vscode-focusBorder);border-left-width:4px;border-radius:4px;padding:8px 10px;margin:0 0 12px;background:var(--vscode-textBlockQuote-background,var(--vscode-editor-background))}
 .notice p:last-child{margin-bottom:0}
@@ -103,6 +106,7 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
   </div>
   <nav aria-label="面板视图">
     <button type="button" id="taskTab" aria-selected="true">任务</button>
+    <button type="button" id="acceptTab" aria-selected="false">验收</button>
     <button type="button" id="settingsTab" aria-selected="false">设置</button>
     <button type="button" id="refresh" title="刷新状态">刷新</button>
   </nav>
@@ -146,21 +150,26 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
       </div>
     </section>
     <section id="codexSection">
-      <p class="label" id="glossary">阶段 = 一次完整开发（规划 → 实现 → 测试 → 审查 → 验收）；任务 = 阶段内拆分出的可并行工作项。</p>
       <div class="field" id="stagePickerRow" hidden>
         <label for="stagePicker">阶段</label>
         <select id="stagePicker" aria-label="选择阶段"></select>
       </div>
       <h3>当前阶段</h3>
       <div id="stageCard"></div>
-      <h3>阶段任务</h3>
-      <div id="tasks"></div>
     </section>
     <section id="queueSection" hidden>
       <h3>等待开始的请求</h3>
       <p class="label" id="queueHint">当前阶段结束后会自动开始；这些请求还没有拆成任务。</p>
       <div id="queue"></div>
     </section>
+  </section>
+  <section id="acceptPage" hidden>
+    <h3>待验收</h3>
+    <p class="label">审查和测试通过后，阶段会进入这里排队；每个阶段给出报告，由你决定验收或退回。</p>
+    <div id="acceptanceQueue"></div>
+    <h3>已验收</h3>
+    <p class="label">验收后的阶段从活动列表移除，记录在这里。</p>
+    <div id="acceptedList"></div>
   </section>
   <section id="settingsPage" hidden>
     <h3>设置</h3>
@@ -191,7 +200,6 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
         <option value="10">10</option>
         <option value="unlimited">unlimited · 无限制</option>
       </select>
-      <span class="label">0 表示不自动返修；unlimited 表示不限制。</span>
     </div>
     <div class="field">
       <label><input id="sDshFrontend" type="checkbox"> 使用 DSH 前端（默认 Codex）</label>
@@ -248,7 +256,7 @@ const ROLLBACK_PHASES = ['已暂停', '需处理'];
 const PLANNING_PHASES = ['规划中', '待澄清', '待确认方案', '规划失败', '规划已中断'];
 const CANCELLABLE_TASKS = ['排队中', '排队执行', '准备中', '实现中', '测试中', '审查中'];
 const RETRYABLE_TASKS = ['已取消', '需处理'];
-const TABS = ['tasks', 'settings'];
+const TABS = ['tasks', 'accept', 'settings'];
 const CLINE_STATUS_NAMES = { todo: '排队中', doing: '实现中', done: '已完成', blocked: '修复中' };
 
 let data = null;
@@ -288,7 +296,9 @@ function showError(message) {
 }
 
 function stages() {
-    return data && Array.isArray(data.stages) ? data.stages : [];
+    return data && Array.isArray(data.stages)
+        ? data.stages.filter(stage => stage.id && !['已验收', '已取消'].includes(text(stage.phase)))
+        : [];
 }
 
 function clineMode() {
@@ -359,32 +369,22 @@ function rollbackCandidate(stage) {
     return tasks.find(task => text(task.status) !== '已集成' && text(task.status) !== '已取消') || null;
 }
 
-function stageActions(stage) {
-    const box = node('div', '', 'buttons');
+function stageBlockedTasks(stage) {
+    const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
+    return tasks.filter(task => ['需处理', '已取消'].includes(text(task.status)));
+}
+
+function stageDisplayState(stage) {
     const phase = text(stage.phase);
-    const candidate = rollbackCandidate(stage);
-    const bound = binding();
-    box.append(actionButton('中断执行',
-        () => send('action', { action: 'interrupt', run: stage.id }), 'secondary', INTERRUPT_PHASES.indexOf(phase) < 0));
-    const cancellable = typeof stage.cancellable === 'boolean' ? stage.cancellable : CANCEL_STAGE_PHASES.indexOf(phase) >= 0;
-    box.append(actionButton('取消阶段',
-        () => send('action', { action: 'cancelStage', run: stage.id }), 'secondary', !cancellable));
-    box.append(actionButton('回退本轮',
-        () => send('action', { action: 'rollback', task: candidate.id, run: stage.id }), 'secondary', !candidate));
-    const accepting = phase === '待验收' || stageBadgeName(stage) === '待验收';
-    const revalidating = phase === '待重新验证';
-    const resumable = phase === '已暂停' || phase === '需处理';
-    box.append(actionButton('继续执行',
-        () => send('action', { action: 'resume', run: stage.id }), 'primary', !resumable));
-    box.append(actionButton('继续重新验证',
-        () => send('action', { action: 'revalidate', run: stage.id }), 'primary', !revalidating));
-    box.append(actionButton('验收',
-        () => send('action', { action: 'accept', run: stage.id }), 'primary', !accepting));
-    box.append(actionButton('重试',
-        () => send('action', { action: 'retry', run: stage.id }), 'secondary', !stage.retryable));
-    box.append(actionButton('解除绑定',
-        () => send('unbind', { run: stage.id }), 'secondary danger', !bound));
-    return box;
+    if (phase === '待验收') return '待验收';
+    const blocked = stageBlockedTasks(stage);
+    if (blocked.length || ['需处理', '已暂停', '已请求暂停', '规划失败'].includes(phase)) return '阻塞';
+    return '进行中';
+}
+
+function shortReason(value, max = 240) {
+    const textValue = text(value);
+    return textValue.length > max ? textValue.slice(0, max) + '…' : textValue;
 }
 
 function renderStageCard() {
@@ -395,61 +395,122 @@ function renderStageCard() {
         target.append(node('p', '当前没有进行中的阶段。', 'label'));
         return;
     }
+    const state = stageDisplayState(stage);
     const card = node('div', '', 'card');
     const top = node('div', '', 'row');
     top.append(node('strong', stage.title || stage.request || stage.id || '未命名阶段'));
-    top.append(node('span', stageBadgeName(stage), 'badge'));
+    top.append(node('span', state, state === '阻塞' ? 'badge danger' : 'badge'));
     card.append(top);
 
-    const badges = node('div', '', 'badges');
-    const active = stageBadgeName(stage);
-    for (const status of STATUSES) {
-        const total = badgeAmount(status, stage);
-        const chip = node('span', total ? status + ' ' + total : status, status === active ? 'sbadge on' : 'sbadge');
-        chip.title = status + (total ? '：' + total + ' 项' : '：无');
-        badges.append(chip);
-    }
-    card.append(badges);
+    const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
+    const integrated = tasks.filter(task => text(task.status) === '已集成').length;
+    card.append(node('p', '任务：共 ' + tasks.length + ' 个，已集成 ' + integrated + ' 个', 'label'));
 
-    const reason = (stage.waiting && stage.waiting.reason) || stage.message || '';
-    card.append(node('p', '原因：' + (reason || '—'), 'label'));
-    const progress = stage.progress || {};
-    card.append(node('p', '进度：共 ' + amount(progress.total) + ' · 排队 ' + amount(progress.queued) +
-        ' · 实现 ' + amount(progress.implementing) + ' · 审查 ' + amount(progress.reviewing) +
-        ' · 修复 ' + amount(progress.repairing) + ' · 已集成 ' + amount(progress.integrated), 'label'));
-    card.append(node('p', '阶段步骤：' + (stage.stageStep || stage.phase || '—'), 'label'));
-    card.append(stageActions(stage));
+    if (state === '阻塞') {
+        const blocked = stageBlockedTasks(stage);
+        if (blocked.length) {
+            for (const task of blocked) {
+                const dependents = tasks.filter(other =>
+                    (Array.isArray(other.dependsOn) ? other.dependsOn : []).includes(task.id));
+                const line = '阻塞任务：' + (task.title || task.id) +
+                    (dependents.length ? '（依赖它的任务：' + dependents.map(item => item.title || item.id).join('、') + '）' : '');
+                card.append(node('p', line, 'label'));
+            }
+            card.append(node('p', '依赖这些任务的工作会等待；不依赖它们的任务会继续。', 'label'));
+        } else {
+            card.append(node('p', '阶段已阻塞，等待处理。', 'label'));
+        }
+        const reason = (stage.waiting && stage.waiting.reason) || stage.message || '';
+        if (reason) card.append(node('p', '原因：' + shortReason(reason), 'label'));
+        if (['已暂停', '需处理'].includes(text(stage.phase))) {
+            card.append(actionButton('继续', () => send('action', { action: 'resume', run: stage.id }), 'primary'));
+        }
+    } else if (state === '待验收') {
+        card.append(node('p', '审查和测试已通过，请在「验收」页查看报告并决定。', 'label'));
+    } else {
+        card.append(node('p', '阶段进行中；需要你处理时会在上方显示阻塞任务。', 'label'));
+    }
     target.append(card);
 }
 
-function taskCard(task, stage, group) {
-    const card = node('div', '', 'card');
-    const top = node('div', '', 'row');
-    top.append(node('strong', task.title || task.id || '未命名任务'));
-    top.append(node('span', group, 'badge'));
-    card.append(top);
-
-    if (Array.isArray(task.paths) && task.paths.length) {
-        card.append(node('p', '路径：' + task.paths.map(entry => text(entry)).join('、'), 'label'));
-    }
-    if (task.reason) card.append(node('p', '原因：' + text(task.reason), 'label'));
-    card.append(node('p', '返修轮次：' + amount(Number(task.round)), 'label'));
-    if (task.status) card.append(node('p', '原始状态：' + text(task.status), 'label'));
-
-    const buttons = node('div', '', 'buttons');
-    const status = text(task.status);
-    buttons.append(actionButton('重试',
-        () => send('action', { action: 'retryTask', task: task.id, run: stage.id }), 'primary', RETRYABLE_TASKS.indexOf(status) < 0));
-    buttons.append(actionButton('取消',
-        () => send('action', { action: 'cancelTask', task: task.id, run: stage.id }), 'secondary', CANCELLABLE_TASKS.indexOf(status) < 0));
-    buttons.append(actionButton('回退本轮',
-        () => send('action', { action: 'rollback', task: task.id, run: stage.id }),
-        'secondary', ROLLBACK_PHASES.indexOf(text(stage.phase)) < 0));
-    buttons.append(actionButton('查看 Cline 历史',
-        () => send('openCline', { taskId: task.id, run: stage.id }), 'secondary'));
-    card.append(buttons);
-    return card;
+function stageReviewOf(stage) {
+    return (stage && stage.stageReview && typeof stage.stageReview === 'object' && stage.stageReview) ||
+        (stage && stage.stageDshReview && typeof stage.stageDshReview === 'object' && stage.stageDshReview) || {};
 }
+
+function acceptanceReport(stage) {
+    const review = stageReviewOf(stage);
+    const lines = [];
+    if (review.summary) lines.push('审查结论：' + review.summary);
+    if (Array.isArray(review.criteria) && review.criteria.length) {
+        lines.push('验收标准：');
+        for (const item of review.criteria) {
+            if (typeof item === 'string') lines.push('- ' + item);
+            else if (item && typeof item === 'object') {
+                lines.push('- ' + (item.id || item.name || '') + ' · ' + (item.status || '') +
+                    (item.evidence ? '：' + item.evidence : ''));
+            }
+        }
+    }
+    const test = stage && stage.stageTest;
+    if (test && typeof test === 'object') {
+        lines.push('测试：' + (test.passed ? '通过' : '未通过') + (test.detail ? '\\n' + test.detail : ''));
+    }
+    return lines.join('\\n\\n') || '审查和测试已完成，没有附加报告。';
+}
+
+function renderAcceptance() {
+    const queue = stages().filter(stage => text(stage.phase) === '待验收');
+    const target = $('acceptanceQueue');
+    target.replaceChildren();
+    if (!queue.length) {
+        target.append(node('p', '暂无待验收阶段。', 'label'));
+    } else {
+        for (const stage of queue) {
+            const card = node('div', '', 'card');
+            const top = node('div', '', 'row');
+            top.append(node('strong', stage.title || stage.request || stage.id || '未命名阶段'));
+            top.append(node('span', '待验收', 'badge'));
+            card.append(top);
+            card.append(node('pre', acceptanceReport(stage), 'report'));
+            const reason = document.createElement('textarea');
+            reason.placeholder = '退回意见（退回时必填）';
+            reason.className = 'reject-reason';
+            card.append(reason);
+            const buttons = node('div', '', 'buttons');
+            buttons.append(actionButton('验收', () => {
+                showError('');
+                send('action', { action: 'accept', run: stage.id });
+            }, 'primary'));
+            buttons.append(actionButton('退回', () => {
+                const feedback = reason.value.trim();
+                if (!feedback) {
+                    showError('退回前请填写退回意见。');
+                    return;
+                }
+                showError('');
+                send('action', { action: 'reject', run: stage.id, text: feedback });
+            }, 'secondary danger'));
+            card.append(buttons);
+            target.append(card);
+        }
+    }
+
+    const accepted = data && Array.isArray(data.archive) ? data.archive : [];
+    const acceptedTarget = $('acceptedList');
+    acceptedTarget.replaceChildren();
+    if (!accepted.length) {
+        acceptedTarget.append(node('p', '还没有已验收阶段。', 'label'));
+    } else {
+        for (const record of accepted.slice(0, 10)) {
+            const row = node('div', '', 'row');
+            row.append(node('strong', record.title || record.id || '未命名阶段'));
+            row.append(node('span', record.archivedAt ? '验收于 ' + record.archivedAt : '已验收', 'label'));
+            acceptedTarget.append(row);
+        }
+    }
+}
+
 
 function renderPipeline() {
     const cline = clineMode();
@@ -476,38 +537,6 @@ function renderStagePicker(list) {
     }
     picker.value = selectedId;
     $('stagePickerRow').hidden = list.length <= 1;
-}
-
-function renderTasks() {
-    const target = $('tasks');
-    const stage = selectedStage();
-    target.replaceChildren();
-    if (!stage) {
-        target.append(node('p', '选择阶段后显示任务。', 'label'));
-        return;
-    }
-    const groups = new Map(TASK_GROUPS.map(name => [name, []]));
-    for (const task of Array.isArray(stage.tasks) ? stage.tasks : []) {
-        const group = taskGroupName(task);
-        if (group) groups.get(group).push(task);
-    }
-    let rendered = 0;
-    for (const [group, tasks] of groups) {
-        if (!tasks.length) continue;
-        const heading = node('h4', group + ' · ' + tasks.length);
-        if (group === '审查中') {
-            const row = node('div', '', 'groupTitle');
-            row.append(heading, node('span', '等待 Codex 返回审查结论；不会自动完成。', 'label'));
-            target.append(row);
-        } else {
-            target.append(heading);
-        }
-        for (const task of tasks) {
-            target.append(taskCard(task, stage, group));
-            rendered += 1;
-        }
-    }
-    if (!rendered) target.append(node('p', '这个阶段当前没有排队中、实现中、审查中或修复中的任务。', 'label'));
 }
 
 function renderQueue() {
@@ -702,9 +731,9 @@ function render() {
         const list = stages();
         renderStagePicker(list);
         renderStageCard();
-        renderTasks();
         renderQueue();
     }
+    renderAcceptance();
     renderBinding();
     renderDshBinding();
     renderSettings();
@@ -728,10 +757,14 @@ function signatureOf(incoming) {
         stages: (Array.isArray(incoming.stages) ? incoming.stages : []).map(stage => [
             stage.id, stage.display, stage.phase, stage.stageStep, stage.retryable, stage.cancellable,
             stage.progress, stage.waiting && stage.waiting.reason, stage.message,
+            stage.stageReview && [stage.stageReview.summary, stage.stageReview.candidate],
+            stage.stageDshReview && [stage.stageDshReview.summary, stage.stageDshReview.candidate],
+            stage.stageTest && [stage.stageTest.passed, stage.stageTest.detail],
             (Array.isArray(stage.tasks) ? stage.tasks : []).map(task =>
-                [task.id, task.title, task.status, task.round, task.reason, task.paths])
+                [task.id, task.title, task.status, task.round, task.reason, task.paths, task.dependsOn])
         ]),
-        queue: (Array.isArray(incoming.queue) ? incoming.queue : []).map(item => [item.id, item.request])
+        queue: (Array.isArray(incoming.queue) ? incoming.queue : []).map(item => [item.id, item.request]),
+        archive: (Array.isArray(incoming.archive) ? incoming.archive : []).map(item => [item.id, item.title, item.archivedAt])
     });
 }
 
@@ -749,8 +782,10 @@ function applyState(incoming) {
 
 function applyTab() {
     $('tasksPage').hidden = tab !== 'tasks';
+    $('acceptPage').hidden = tab !== 'accept';
     $('settingsPage').hidden = tab !== 'settings';
     $('taskTab').setAttribute('aria-selected', String(tab === 'tasks'));
+    $('acceptTab').setAttribute('aria-selected', String(tab === 'accept'));
     $('settingsTab').setAttribute('aria-selected', String(tab === 'settings'));
 }
 
@@ -768,6 +803,7 @@ function commitSnapshot() {
 }
 
 $('taskTab').onclick = () => selectTab('tasks');
+$('acceptTab').onclick = () => selectTab('accept');
 $('settingsTab').onclick = () => selectTab('settings');
 
 $('openCline').onclick = () => {

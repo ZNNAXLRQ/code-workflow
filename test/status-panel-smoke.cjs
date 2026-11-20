@@ -61,27 +61,33 @@ assert.equal((html.match(/<\/script>/g) || []).length, 1);
 assert.equal(html.split(nonce).length - 1, 4, 'nonce 应恰好出现在 CSP 两处与 style / script 两个标签上');
 ok('nonce 覆盖 CSP、style、script 三处');
 
-// --- 两个 tab -------------------------------------------------------------
+// --- 三个 tab -------------------------------------------------------------
 text(html, '>任务</button>', '任务 tab 文案');
+text(html, '>验收</button>', '验收 tab 文案');
 text(html, '>设置</button>', '设置 tab 文案');
 text(html, 'id="taskTab" aria-selected="true"', '默认选中任务页');
+text(html, 'id="acceptTab" aria-selected="false"', '验收页初始未选中');
 text(html, 'id="settingsTab" aria-selected="false"', '设置页初始未选中');
 text(html, 'id="tasksPage"', '任务页容器');
+text(html, 'id="acceptPage" hidden', '验收页初始隐藏');
 text(html, 'id="settingsPage" hidden', '设置页初始隐藏');
 has(html, /\$\('tasksPage'\)\.hidden = tab !== 'tasks'/, '切换 tab 只切显隐');
+has(html, /\$\('acceptPage'\)\.hidden = tab !== 'accept'/, '验收页按 tab 显示');
 has(html, /\$\('settingsPage'\)\.hidden = tab !== 'settings'/, '设置页按 tab 显示');
 has(html, /\$\('taskTab'\)\.setAttribute\('aria-selected'/, 'tab 同步 aria-selected');
-text(html, 'scrollMemory', '两个 tab 各自记忆滚动位置');
+text(html, 'scrollMemory', '各 tab 各自记忆滚动位置');
 text(html, 'function selectTab', 'tab 切换函数');
-ok('两个 tab 且切换不重建页面');
+ok('三个 tab 且切换不重建页面');
 
-// 会话绑定和设置项都在设置页
+// 会话绑定和设置项都在设置页，验收页在任务与设置之间
 const tasksIndex = html.indexOf('id="tasksPage"');
+const acceptIndex = html.indexOf('id="acceptPage"');
 const bindingIndex = html.indexOf('id="bindingSection"');
 const settingsIndex = html.indexOf('id="settingsPage"');
 const settingsFieldIndex = html.indexOf('id="sParallel"');
-assert.ok(tasksIndex < settingsIndex && settingsIndex < bindingIndex, '绑定区必须在设置页内');
-ok('Codex/DSH 会话绑定位于设置页');
+assert.ok(tasksIndex < acceptIndex && acceptIndex < settingsIndex && settingsIndex < bindingIndex,
+    '验收页必须在任务页和设置页之间，绑定区在设置页内');
+ok('任务 / 验收 / 设置顺序正确');
 assert.ok(settingsFieldIndex > settingsIndex, '设置项必须在设置页内');
 ok('设置项位于设置页');
 
@@ -116,18 +122,44 @@ text(html, '#refresh{margin-left:auto', '刷新按钮靠右');
 missing(html, /id="commitSnapshot"/, '任务页重复的提交快照按钮已删除');
 text(html, 'id="commitSnapshotSettings"', '设置页保留提交快照按钮');
 
-// --- 7 个状态标签 ---------------------------------------------------------
-text(html, "const STATUSES = ['排队中', '规划中', '实现中', '审查中', '修复中', '待验收', '已验收'];",
-    '7 个状态按固定顺序声明');
-for (const label of ['排队中', '规划中', '实现中', '审查中', '修复中', '待验收', '已验收']) {
-    text(html, "'" + label + "'", '状态标签 ' + label);
-}
-has(html, /for \(const status of STATUSES\)/, '逐阶段渲染 7 个徽章');
-text(html, "status === active ? 'sbadge on' : 'sbadge'", '当前状态徽章高亮');
-text(html, 'stageBadgeName', '阶段展示状态由 display 归一');
-text(html, "原因：", '阶段展示等待/阻塞原因');
-text(html, '进度：共 ', '阶段展示 progress 计数');
-text(html, '阶段步骤：', '阶段展示 stageStep');
+// --- 阶段状态：进行中 / 阻塞 / 待验收 ---------------------------------------
+text(html, 'function stageDisplayState(stage)', '阶段状态汇总函数');
+text(html, "if (phase === '待验收') return '待验收';", '待验收阶段识别');
+text(html, "if (blocked.length || ['需处理', '已暂停', '已请求暂停', '规划失败'].includes(phase)) return '阻塞';",
+    '任务阻塞或阶段阻塞归为阻塞');
+text(html, "return '进行中';", '其余阶段为进行中');
+text(html, 'function stageBlockedTasks(stage)', '阻塞任务识别');
+text(html, "['需处理', '已取消'].includes", '需处理/已取消任务视为阻塞');
+text(html, '阻塞任务：', '阻塞时显示卡住的任务');
+text(html, '依赖它的任务：', '阻塞信息提示受影响任务');
+text(html, '依赖这些任务的工作会等待；不依赖它们的任务会继续。', '不依赖阻塞任务的工作继续');
+text(html, "['已验收', '已取消'].includes", '已验收/已取消阶段从活动列表消失');
+text(html, "send('action', { action: 'resume', run: stage.id })", '阻塞阶段只保留一个继续按钮');
+missing(html, /for \(const status of STATUSES\)/, '不再逐阶段渲染 7 个任务状态徽章');
+missing(html, /id="tasks"/, '不再渲染阶段任务列表');
+missing(html, /阶段 = 一次完整开发/, '已删除阶段/任务解释长句');
+missing(html, /0 表示不自动返修/, '已删除返修上限说明');
+missing(html, /<h3>阶段任务<\/h3>/, '已删除「阶段任务」分区');
+ok('阶段只显示进行中/阻塞/待验收');
+
+// --- 验收页 ---------------------------------------------------------------
+text(html, 'id="acceptanceQueue"', '待验收队列容器');
+text(html, 'id="acceptedList"', '已验收清单容器');
+text(html, 'function renderAcceptance()', '验收页渲染函数');
+text(html, 'function acceptanceReport(stage)', '验收报告生成函数');
+text(html, '审查结论：', '验收报告包含审查结论');
+text(html, '验收标准：', '验收报告包含验收标准');
+text(html, '测试：', '验收报告包含测试结果');
+text(html, '暂无待验收阶段。', '验收页空态');
+text(html, '还没有已验收阶段。', '已验收空态');
+text(html, '退回意见（退回时必填）', '退回意见输入框');
+has(html, /send\('action', \{ action: 'accept', run: stage\.id \}\)/, '验收页发送 accept');
+has(html, /send\('action', \{ action: 'reject', run: stage\.id, text: feedback \}\)/, '验收页发送 reject + 意见');
+missing(html, /action: 'revalidate'/, '不再有继续重新验证按钮');
+missing(html, /action: 'interrupt'/, '不再有中断执行按钮');
+missing(html, /action: 'cancelStage'/, '不再有取消阶段按钮');
+missing(html, /send\('unbind', \{ run: stage\.id \}\)/, '阶段卡不再有解除绑定按钮');
+ok('验收页承载验收/退回，阶段卡不再放大堆按钮');
 
 text(html, 'id="pipelineState"', '调度状态（只读）');
 text(html, "'调度：' + (paused ? '已暂停' : '运行中')", '调度状态文案只读刷新');
@@ -138,13 +170,9 @@ missing(html, /'pipelinePause'|'pipelineResume'|send\('pipeline/, '不再发送 
 assert.equal((html.match(/暂停调度/g) || []).length, 1, '「暂停调度」只应出现在只读说明里');
 ok('「暂停调度」仅出现在只读说明中');
 missing(html, /恢复调度/, '不再有「恢复调度」按钮文案');
-missing(html, /actionButton\(paused \?/, '阶段操作里也没有暂停/恢复按钮');
 
-// --- 阶段 / 任务 / 队列说明 -----------------------------------------------
-text(html, '阶段 = 一次完整开发（规划 → 实现 → 测试 → 审查 → 验收）；任务 = 阶段内拆分出的可并行工作项。',
-    '任务页顶部解释阶段与任务');
+// --- 阶段 / 队列 -----------------------------------------------------------
 text(html, '<h3>当前阶段</h3>', '「当前阶段」分区');
-text(html, '<h3>阶段任务</h3>', '「阶段任务」分区');
 text(html, 'id="stageCard"', '只有一个当前阶段卡片');
 missing(html, /id="stages"/, '不再渲染阶段列表');
 missing(html, /查看这个阶段/, '不再有阶段列表里的查看按钮');
@@ -156,18 +184,6 @@ text(html, '当前阶段结束后会自动开始；这些请求还没有拆成�
 has(html, /\$\('queueSection'\)\.hidden = !items\.length/, '队列为空时不显示');
 missing(html, /排队请求/, '不再使用「排队请求」叫法');
 text(html, '取消请求', '队列项按钮为「取消请求」');
-
-// --- 任务分组（四组） -----------------------------------------------------
-text(html, "const TASK_GROUPS = ['排队中', '实现中', '审查中', '修复中'];", '任务分四组且顺序固定');
-text(html, "if (status === '审查中' || status === '待审查') return '审查中';", '审查中/待审查归入审查中组');
-text(html, "if (status === '实现中' || status === '测试中' || status === '集成中' || status === '取消中') return '实现中';",
-    '实现中组只含实现/测试/集成/取消中，审查中已移出');
-text(html, "if (status === '需处理' || status === '已取消') return '修复中';", '需处理/已取消归入修复中组');
-text(html, '等待 Codex 返回审查结论；不会自动完成。', '审查中组标题旁的小字');
-text(html, "if (group === '审查中')", '只有审查中组带这句说明');
-text(html, 'groupTitle', '审查中组标题单独排版');
-text(html, '这个阶段当前没有排队中、实现中、审查中或修复中的任务。', '空任务提示覆盖四组');
-has(html, /for \(const \[group, tasks\] of groups\)/, '按 TASK_GROUPS 顺序渲染各组');
 
 // --- 顶部路径只出现一次 ---------------------------------------------------
 assert.equal((html.match(/id="repo"/g) || []).length, 1, '仓库路径只有一个元素');
@@ -258,32 +274,32 @@ assert.ok(!clineBody.includes('STATUSES') && !clineBody.includes('sbadge'), 'Cli
 assert.ok(!clineBody.includes('stageActions'), 'Cline 视图不渲染阶段操作');
 ok('Cline 视图无阶段卡片/7 徽章/阶段操作');
 const nav = html.slice(html.indexOf('<nav'), html.indexOf('</nav>'));
-assert.equal((nav.match(/<button\b/g) || []).length, 3, 'tab 导航包含任务、设置和刷新');
-ok('Cline 视图仍只有任务/设置两个 tab，刷新在同一排');
+assert.equal((nav.match(/<button\b/g) || []).length, 4, 'tab 导航包含任务、验收、设置和刷新');
+ok('任务/验收/设置三个 tab，刷新在同一排');
 
 // --- 消息契约 -------------------------------------------------------------
 has(html, /send\('ready'\)/, '挂载后发送 ready');
 has(html, /send\('refresh'\)/, '刷新按钮发送 refresh');
 has(html, /send\('selectStage', \{ run:/, '阶段选择发送 selectStage');
 has(html, /send\('cancelQueued', \{ id: item\.id \}\)/, '取消请求发送 cancelQueued');
-has(html, /send\('action', \{ action: 'interrupt', run: stage\.id \}\)/, '中断执行 action:interrupt');
-has(html, /send\('action', \{ action: 'cancelStage', run: stage\.id \}\)/, '取消阶段 action:cancelStage');
-has(html, /send\('action', \{ action: 'rollback', task: candidate\.id, run: stage\.id \}\)/, '回退本轮 action:rollback');
 has(html, /send\('action', \{ action: 'accept', run: stage\.id \}\)/, '验收 action:accept');
-has(html, /send\('action', \{ action: 'resume', run: stage\.id \}\)/, '继续执行 action:resume');
-has(html, /send\('action', \{ action: 'revalidate', run: stage\.id \}\)/, '继续重新验证 action:revalidate');
-has(html, /继续重新验证/, '待重新验证阶段有继续按钮');
-has(html, /send\('action', \{ action: 'retry', run: stage\.id \}\)/, '阶段重试 action:retry');
-has(html, /send\('action', \{ action: 'cancelTask', task: task\.id, run: stage\.id \}\)/, '任务取消 action:cancelTask');
-has(html, /send\('action', \{ action: 'retryTask', task: task\.id, run: stage\.id \}\)/, '任务重试 action:retryTask');
-has(html, /send\('openCline', \{ taskId: task\.id, run: stage\.id \}\)/, '查看 Cline 历史发送 openCline');
-has(html, /send\('unbind', \{ run: stage\.id \}\)/, '解除绑定发送 unbind');
+has(html, /send\('action', \{ action: 'reject', run: stage\.id, text: feedback \}\)/, '退回 action:reject + 意见');
+has(html, /send\('action', \{ action: 'resume', run: stage\.id \}\)/, '阻塞阶段继续 action:resume');
+missing(html, /send\('action', \{ action: 'interrupt'/, '不再发送 interrupt');
+missing(html, /send\('action', \{ action: 'cancelStage'/, '不再发送 cancelStage');
+missing(html, /send\('action', \{ action: 'rollback'/, '不再发送 rollback');
+missing(html, /send\('action', \{ action: 'revalidate'/, '不再发送 revalidate');
+missing(html, /send\('action', \{ action: 'retry', run: stage\.id \}\)/, '不再有阶段重试');
+missing(html, /send\('action', \{ action: 'cancelTask'/, '不再有任务取消按钮');
+missing(html, /send\('action', \{ action: 'retryTask'/, '不再有任务重试按钮');
+missing(html, /send\('openCline', \{ taskId:/, '不再有查看 Cline 历史按钮');
+missing(html, /send\('unbind', \{ run: stage\.id \}\)/, '阶段卡不再有解除绑定');
 has(html, /send\('bind', \{ threadId: threadId \}\)/, '绑定发送 bind + threadId');
 has(html, /send\('settings', \{/, '保存设置发送 settings');
 text(html, 'api.postMessage', '所有交互走 postMessage');
 
 // --- 无聊天 / 无 markdown / 无外部资源 ------------------------------------
-missing(html, /<textarea/i, '没有 textarea（无聊天输入）');
+text(html, "document.createElement('textarea')", '只有验收退回意见 textarea');
 missing(html, /发送消息/, '没有聊天发送文案');
 missing(html, /id="send"/, '没有发送按钮');
 missing(html, /markdown/i, '没有 markdown 渲染');

@@ -16,12 +16,28 @@ const path = require('node:path');
 const DEFAULT_TIMEOUT_MS = 45 * 60 * 1000;
 
 function discoverDshCommand() {
-    if (process.env.DSH_NODE_EXECUTABLE && fs.existsSync(process.env.DSH_NODE_EXECUTABLE)) {
-        return process.env.DSH_NODE_EXECUTABLE;
+    const executableName = 'DeepSeek Harness.exe';
+    const candidates = [];
+    if (process.env.DSH_NODE_EXECUTABLE) candidates.push(process.env.DSH_NODE_EXECUTABLE);
+    const roots = [
+        process.env.ProgramFiles,
+        process.env.ProgramW6432,
+        process.env['ProgramFiles(x86)'],
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs'),
+        'C:\\Program Files',
+        'D:\\Program Files',
+        'E:\\Program Files'
+    ].filter(Boolean);
+    for (const root of roots) {
+        candidates.push(path.join(root, 'DeepseekHarness', executableName));
     }
-    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
-    const common = path.join(programFiles, 'DeepseekHarness', 'DeepSeek Harness.exe');
-    if (fs.existsSync(common)) return common;
+    for (const candidate of candidates) {
+        try {
+            if (fs.existsSync(candidate)) return candidate;
+        } catch {
+            // Ignore an unreadable candidate and keep looking.
+        }
+    }
     return 'dsh';
 }
 
