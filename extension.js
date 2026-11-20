@@ -1450,6 +1450,8 @@ function activate(context) {
             if (item.binding) throw new Error('正在验证 Codex 会话，请稍后。');
             const worker = item.stageWorker(message.run);
             if (!message.run || !worker) throw new Error('任务已切换，请检查当前提示');
+            if (message.action === 'stagePause') return worker.action('pause');
+            if (message.action === 'stageResume') return worker.action('resume');
             if (message.action === 'pause') return item.setPipelinePaused(true);
             if (message.action === 'resume' && item.pipelinePaused) {
                 if (message.text && worker.state.phase === '已暂停') delete worker.state.pipelineSuspended;

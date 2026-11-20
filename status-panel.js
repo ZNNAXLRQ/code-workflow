@@ -413,6 +413,13 @@ function renderStageCard() {
     const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
     const integrated = tasks.filter(task => text(task.status) === '已集成').length;
     card.append(node('p', '任务：共 ' + tasks.length + ' 个，已集成 ' + integrated + ' 个', 'label'));
+    const phase = text(stage.phase);
+    const paused = ['已暂停', '已请求暂停', '需处理'].includes(phase);
+    const actions = node('div', '', 'row');
+    actions.append(actionButton(paused ? '继续' : '暂停',
+        () => send('action', { action: paused ? 'stageResume' : 'stagePause', run: stage.id }),
+        'secondary', ['已取消', '已验收'].includes(phase)));
+    card.append(actions);
 
     if (state === '阻塞') {
         const blocked = stageBlockedTasks(stage);
