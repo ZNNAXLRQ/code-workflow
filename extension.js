@@ -802,6 +802,8 @@ function activate(context) {
                 });
             }
             const reviewJournal = new ReviewJournal(path.join(store, 'reviews.json'));
+            let markOutboxReady;
+            const outboxReady = new Promise(resolve => { markOutboxReady = resolve; });
             const reviewBroker = createReviewBroker({
                 log,
                 journal: reviewJournal,
@@ -811,6 +813,8 @@ function activate(context) {
                     let threadId = item.codexThreadId;
                     try { threadId = bindingStore.readBinding(repo)?.codexThreadId || threadId; } catch {}
                     if (!threadId) throw new Error('尚未绑定 Codex 会话，无法提交审查');
+                    await outboxReady;
+                    if (!item.outbox) throw new Error('Codex 发件箱尚未就绪，无法提交审查');
                     const lines = batch.entries.map(entry => {
                         const criteria = (entry.criteria || []).map(check =>
                             typeof check === 'string' ? check
@@ -842,6 +846,7 @@ function activate(context) {
             outbox.canSend = entry => entry.kind !== 'handoff' || item.frontend === 'codex';
             outbox.onAck = null;
             Object.assign(item, { codexSession: session, codexQuestions: questions, saveBinding, relay, hostBridge, outbox, reviewBroker });
+            markOutboxReady();
             liveItems.add(item);
             let hub = null;
             let hubToken = null;
