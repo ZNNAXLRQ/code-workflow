@@ -423,9 +423,6 @@ function renderStageCard() {
         }
         const reason = (stage.waiting && stage.waiting.reason) || stage.message || '';
         if (reason) card.append(node('p', '原因：' + shortReason(reason), 'label'));
-        if (['已暂停', '需处理'].includes(text(stage.phase))) {
-            card.append(actionButton('继续', () => send('action', { action: 'resume', run: stage.id }), 'primary'));
-        }
     } else if (state === '待验收') {
         card.append(node('p', '审查和测试已通过，请在「验收」页查看报告并决定。', 'label'));
     } else {
@@ -566,6 +563,19 @@ function renderTaskStatuses() {
         }
         if (task.reason) card.append(node('p', '原因：' + shortReason(task.reason), 'label'));
         card.append(node('p', '返修轮次：' + amount(Number(task.round)), 'label'));
+        const buttons = node('div', '', 'buttons');
+        buttons.append(actionButton('重试',
+            () => send('action', { action: 'retryTask', task: task.id, run: stage.id }),
+            'primary', RETRYABLE_TASKS.indexOf(status) < 0));
+        buttons.append(actionButton('取消',
+            () => send('action', { action: 'cancelTask', task: task.id, run: stage.id }),
+            'secondary', CANCELLABLE_TASKS.indexOf(status) < 0));
+        buttons.append(actionButton('回退本轮',
+            () => send('action', { action: 'rollback', task: task.id, run: stage.id }),
+            'secondary', ROLLBACK_PHASES.indexOf(text(stage.phase)) < 0));
+        buttons.append(actionButton('查看 Cline 历史',
+            () => send('openCline', { taskId: task.id, run: stage.id }), 'secondary'));
+        card.append(buttons);
         target.append(card);
     }
 }
