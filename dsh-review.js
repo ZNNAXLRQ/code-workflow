@@ -3,7 +3,7 @@
 /**
  * DSH 自审适配器。
  *
- * 通过 `dsh --profile headless --json` 一次性运行一个只读审查任务，
+ * 通过 `dsh --profile <profile> --json` 一次性运行一个审查任务，
  * 读取 NDJSON 事件里的 session 与 final，再把 final 文本解析成工作流
  * 需要的审查结果。审查提示要求 DSH 使用 goal/多轮自审，直到没有新的
  * 阻塞问题后再输出最终 JSON。这里不判断额度，也不修改仓库。
@@ -139,12 +139,12 @@ function validateShaped(review, data) {
     return { ...review, candidate: data.candidate };
 }
 
-function runDshReview({ cwd, data, label, executable, args, permissionMode, approvalPolicy, timeoutMs = DEFAULT_TIMEOUT_MS, signal, log = () => {} }) {
+function runDshReview({ cwd, data, label, executable, args, profile = 'desktop', permissionMode, approvalPolicy, timeoutMs = DEFAULT_TIMEOUT_MS, signal, log = () => {} }) {
     const launcher = resolveDshLauncher(executable);
     const command = launcher.command;
     const commandArgs = Array.isArray(args) && args.length
         ? args
-        : [...launcher.prefix, '--profile', 'headless',
+        : [...launcher.prefix, '--profile', profile,
             ...(permissionMode ? ['--permission-mode', permissionMode] : []),
             ...(approvalPolicy ? ['--approval-policy', approvalPolicy] : []),
             '--json', '-'];

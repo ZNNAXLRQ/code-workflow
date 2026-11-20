@@ -72,6 +72,11 @@
           "default": "danger-full-access",
           "description": "DSH 自审使用的权限预设；完全权限，允许它修复代码。"
         },
+        "localWorkflow.dshReviewProfile": {
+          "type": "string",
+          "default": "desktop",
+          "description": "DSH 自审使用的 DSH profile；应与 DSH 前端/模型凭据所在 profile 一致（默认 desktop）。"
+        },
         "localWorkflow.dshReviewApprovalPolicy": {
           "type": "string",
           "enum": [
