@@ -395,7 +395,7 @@ class Workflow {
 
     canCancelStage() {
         return Boolean(this.state.id && !this.jobs.size && !this.phaseController && !this.approving &&
-            ['已暂停', '规划已中断', '规划失败', '待澄清', '待确认方案', '需处理'].includes(this.state.phase));
+            ['已暂停', '规划已中断', '规划失败', '待澄清', '待确认方案', '需处理', '待验收'].includes(this.state.phase));
     }
 
     async cancelStage() {

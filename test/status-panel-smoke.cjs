@@ -170,7 +170,7 @@ has(html, /send\('action', \{ action: 'accept', run: stage\.id \}\)/, '验收页
 has(html, /send\('action', \{ action: 'reject', run: stage\.id, text: feedback \}\)/, '验收页发送 reject + 意见');
 missing(html, /action: 'revalidate'/, '不再有继续重新验证按钮');
 missing(html, /action: 'interrupt'/, '不再有中断执行按钮');
-missing(html, /action: 'cancelStage'/, '不再有取消阶段按钮');
+has(html, /action: 'cancelStage'/, '验收 tab 可以取消待验收阶段');
 missing(html, /send\('unbind', \{ run: stage\.id \}\)/, '阶段卡不再有解除绑定按钮');
 ok('验收页承载验收/退回，阶段卡不再放大堆按钮');
 
@@ -299,7 +299,7 @@ has(html, /send\('action', \{ action: 'accept', run: stage\.id \}\)/, '验收 ac
 has(html, /send\('action', \{ action: 'reject', run: stage\.id, text: feedback \}\)/, '退回 action:reject + 意见');
 missing(html, /send\('action', \{ action: 'resume', run: stage\.id \}\)/, '阶段卡不再有继续按钮');
 missing(html, /send\('action', \{ action: 'interrupt'/, '不再发送 interrupt');
-missing(html, /send\('action', \{ action: 'cancelStage'/, '不再发送 cancelStage');
+has(html, /send\('action', \{ action: 'cancelStage'/, '验收 tab 发送 cancelStage');
 has(html, /send\('action', \{ action: 'rollback'/, '任务回退 action:rollback');
 missing(html, /send\('action', \{ action: 'revalidate'/, '不再发送 revalidate');
 missing(html, /send\('action', \{ action: 'retry', run: stage\.id \}\)/, '不再有阶段重试');

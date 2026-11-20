@@ -500,6 +500,10 @@ function renderAcceptance() {
                 showError('');
                 send('action', { action: 'reject', run: stage.id, text: feedback });
             }, 'secondary danger'));
+            buttons.append(actionButton('取消阶段', () => {
+                showError('');
+                send('action', { action: 'cancelStage', run: stage.id });
+            }, 'secondary'));
             card.append(buttons);
             target.append(card);
         }
