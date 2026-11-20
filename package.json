@@ -142,6 +142,11 @@
           "type": "boolean",
           "default": false,
           "description": "阶段开始时是否先提交现有工作区快照，作为实现前基线。"
+        },
+        "localWorkflow.dshReviewApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "DSH 自审使用的 DeepSeek API key；写入后直接传给 headless DSH，不再从环境变量读取。"
         }
       }
     }

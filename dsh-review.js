@@ -139,7 +139,7 @@ function validateShaped(review, data) {
     return { ...review, candidate: data.candidate };
 }
 
-function runDshReview({ cwd, data, label, executable, args, profile = 'headless', permissionMode, approvalPolicy, timeoutMs = DEFAULT_TIMEOUT_MS, signal, log = () => {} }) {
+function runDshReview({ cwd, data, label, executable, args, profile = 'headless', apiKey = '', permissionMode, approvalPolicy, timeoutMs = DEFAULT_TIMEOUT_MS, signal, log = () => {} }) {
     const launcher = resolveDshLauncher(executable);
     const command = launcher.command;
     const commandArgs = Array.isArray(args) && args.length
@@ -155,6 +155,7 @@ function runDshReview({ cwd, data, label, executable, args, profile = 'headless'
             const env = {
                 ...process.env,
                 ...launcher.env,
+                ...(apiKey ? { DEEPSEEK_API_KEY: apiKey } : {}),
                 OLLAMA_API_KEY: process.env.OLLAMA_API_KEY || 'ollama'
             };
             child = spawn(command, commandArgs, { cwd, windowsHide: true, env });
