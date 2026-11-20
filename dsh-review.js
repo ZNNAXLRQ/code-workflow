@@ -63,8 +63,8 @@ function resolveDshLauncher(value) {
 
 function reviewPrompt(where, data, label) {
     const criteria = (data.criteria || []).map(item => ({ id: item.id, description: item.description }));
-    return [
-        '你是本地开发工作流的 DSH 初审兼修复者。你有完全权限，可以读取、修改、创建、删除文件，运行命令并提交修复。',
+    const subagentPrompt = [
+        '你是本地开发工作流的 DSH 初审子智能体。你有完全权限，可以读取、修改、创建、删除文件，运行命令并提交修复。',
         '仓库工作目录：' + where,
         '审查对象：' + label,
         '阶段/任务：' + (data.title || ''),
@@ -78,7 +78,7 @@ function reviewPrompt(where, data, label) {
         '历史审查：' + JSON.stringify(data.previous || null),
         '',
         '审查流程要求：',
-        '1. 如果当前工具有 goal 工具，先创建/使用目标（goal）：完整审查并修复本次候选，完成至少两轮自审，直到没有新的阻塞问题；没有 goal 工具时也要做至少两轮自审。',
+        '1. 第一步创建 goal（审查目标）：完整审查并修复本次候选，至少两轮自审，直到没有新的阻塞问题。没有 goal 工具时也必须完成至少两轮自审，不要停在“等待目标确认”。',
         '2. 实际读取 diff、相关文件，并按验收标准逐项核对；发现阻塞问题就直接修复，并运行相关测试。',
         '3. 你可以修改工作树、补充测试、提交修复；不要修改计划范围之外的文件，不要把风格偏好当阻塞。',
         '4. 修复后必须复核：重新读取 diff/文件，确认阻塞问题消失，测试通过。',
@@ -90,6 +90,16 @@ function reviewPrompt(where, data, label) {
         '  "findings": [{"path": "src/a.js", "line": 42, "blocking": true, "problem": "问题", "evidence": "证据", "correction": "修复方向"}]',
         '}',
         'pass 时 findings 必须为空数组；只有全部验收项有证据且没有阻塞问题时才 pass。'
+    ].join('\n');
+    return [
+        '你是本地开发工作流的 DSH 初审协调者。父会话不要创建 main goal，也不要自己直接修改代码；审查目标必须放在独立子智能体里。',
+        '必须调用 subagent 工具，创建一个审查子智能体，把下面完整任务作为子智能体的 prompt；随后必须调用 wait_agent 等待子智能体完成，不要提前结束回合。',
+        '子智能体完成后，把它的最终 JSON 原样作为你的最终输出。',
+        '如果 subagent 工具不可用，或者子智能体启动失败，你直接按下面同一份任务完成审查（不要创建 goal，不要等待确认）。',
+        '',
+        '===== 子智能体任务开始 =====',
+        subagentPrompt,
+        '===== 子智能体任务结束 ====='
     ].join('\n');
 }
 
@@ -186,7 +196,11 @@ function runDshReview({ cwd, data, label, executable, args, permissionMode, appr
                 if (!line.trim()) continue;
                 try {
                     const event = JSON.parse(line);
-                    if (event.type === 'session' && event.sessionId) sessionId = event.sessionId;
+                    if (event.type === 'session' && event.sessionId) {
+                        sessionId = event.sessionId;
+                        log('[dsh-review] session ' + sessionId);
+                    }
+                    if (event.type === 'status' && event.text) log('[dsh-review] ' + event.text);
                     if (event.type === 'final') {
                         sessionId = event.sessionId || sessionId;
                         finalText = typeof event.text === 'string' ? event.text : finalText;
