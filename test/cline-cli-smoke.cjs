@@ -123,6 +123,22 @@ async function testSuccess() {
     console.log('PASS 成功解析与参数');
 }
 
+async function testPreparedRuntime() {
+    const result = await runTask({
+        cwd: root,
+        prompt: 'prepared task',
+        runtime: { command: process.execPath, baseArgs: [success, '--data-dir', 'private-data'], env: {} },
+        extraArgs: ['--provider', 'ollama', '--model', 'local-model']
+    });
+    assert.equal(result.finalText, 'done');
+    assert.deepEqual(JSON.parse(fs.readFileSync(successArgs, 'utf8')), [
+        '--data-dir', 'private-data', '--json', '--auto-approve=true',
+        '--provider', 'ollama', '--model', 'local-model',
+        '--timeout', '840', '--', 'prepared task'
+    ]);
+    console.log('PASS 复用 Cline 原生 provider/data-dir');
+}
+
 async function testFailure() {
     await assert.rejects(
         runTask({ cwd: root, prompt: 'fail', clineEntry: failed }),
@@ -197,13 +213,14 @@ async function testAbort() {
     try {
         testResolve();
         await testSuccess();
+        await testPreparedRuntime();
         await testFailure();
         await testNonzeroExit();
         await testQuestion();
         await testNoSession();
         await testUnverified();
         await testAbort();
-        console.log('cline-cli-smoke: 全部通过（8 项）');
+        console.log('cline-cli-smoke: 全部通过（9 项）');
     } catch (error) {
         console.error('cline-cli-smoke: 失败');
         console.error(error);

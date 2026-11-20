@@ -91,12 +91,12 @@ function findSessionId(final, events) {
     return null;
 }
 
-function runTask({ cwd, prompt, clineEntry, signal, timeoutSec = 840, onLog } = {}) {
+function runTask({ cwd, prompt, clineEntry, signal, timeoutSec = 840, onLog, runtime: prepared, extraArgs = [] } = {}) {
     if (typeof cwd !== 'string' || !cwd) return Promise.reject(new Error('runTask 需要 cwd'));
     if (typeof prompt !== 'string' || !prompt) return Promise.reject(new Error('runTask 需要 prompt'));
     let runtime;
     try {
-        runtime = resolveCline({ clineEntry });
+        runtime = prepared || resolveCline({ clineEntry });
     } catch (error) {
         return Promise.reject(error);
     }
@@ -153,11 +153,12 @@ function runTask({ cwd, prompt, clineEntry, signal, timeoutSec = 840, onLog } = 
                 ...runtime.baseArgs,
                 '--json',
                 '--auto-approve=true',
+                ...extraArgs,
                 '--timeout', String(timeoutSec),
                 '--', prompt
             ], {
                 cwd,
-                env: { ...process.env, ...runtime.env, NO_PROXY: bypass, no_proxy: bypass },
+                env: { ...process.env, ...(runtime.env || runtime.runtimeEnv || {}), NO_PROXY: bypass, no_proxy: bypass },
                 windowsHide: true,
                 stdio: ['ignore', 'pipe', 'pipe']
             });

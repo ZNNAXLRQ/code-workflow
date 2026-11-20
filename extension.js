@@ -533,18 +533,27 @@ function makeAdapter(_context, config, log, session, workspace, question, relay,
             });
         },
         async implement(where, prompt, report, task, signal) {
-            const result = await clineCli.runTask({
-                cwd: where,
-                prompt,
-                clineEntry: config().clineEntry,
-                signal,
-                onLog: report
-            });
-            if (result.question !== null && result.question !== undefined) {
-                const question = String(result.question).trim();
-                throw Object.assign(new Error(question || '实现需要补充信息'), { question });
+            const preferences = await modePreferences('Act');
+            const privateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cline-act-'));
+            try {
+                const runtime = await prepareCline(privateDir);
+                const extraArgs = await nativeProviderArgs(runtime, where, preferences, signal, report);
+                const result = await clineCli.runTask({
+                    cwd: where,
+                    prompt,
+                    runtime,
+                    extraArgs,
+                    signal,
+                    onLog: report
+                });
+                if (result.question !== null && result.question !== undefined) {
+                    const question = String(result.question).trim();
+                    throw Object.assign(new Error(question || '实现需要补充信息'), { question });
+                }
+                return result.finalText;
+            } finally {
+                await fs.rm(privateDir, { recursive: true, force: true }).catch(() => {});
             }
-            return result.finalText;
         },
         test: (where, userCommand, report, signal) => process.platform === 'win32'
             ? run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
