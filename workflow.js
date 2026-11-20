@@ -1326,15 +1326,13 @@ class Workflow {
             if (typeof this.adapter.selfReview !== 'function') throw new Error('DSH 自审未配置审查适配器。');
             const criteria = criteriaFor([task]);
             await this.status(task, '排队执行', '等待 DSH 自审');
-            const dshReview = await this.lane('dsh-review', async () => {
-                signal.throwIfAborted();
-                await this.status(task, 'DSH 自审中');
-                return this.adapter.selfReview(task.tree, {
-                    title: task.title, requirements: task.requirements, clarification: task.feedback,
-                    base: task.base, candidate: reviewedSha, criteria, test: null,
-                    testCoverage: task.testCoverage, previous: task.dshReview
-                }, task.id, signal);
-            });
+            signal.throwIfAborted();
+            await this.status(task, 'DSH 自审中');
+            const dshReview = await this.adapter.selfReview(task.tree, {
+                title: task.title, requirements: task.requirements, clarification: task.feedback,
+                base: task.base, candidate: reviewedSha, criteria, test: null,
+                testCoverage: task.testCoverage, previous: task.dshReview
+            }, task.id, signal);
             task.dshReview = dshReview;
             const changed = await this.commitDshWorktree(task.tree, `workflow: ${task.id} DSH self-review`);
             task.dshReview = { ...dshReview, candidate: changed };
