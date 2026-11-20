@@ -1,7 +1,7 @@
 {
   "name": "local-review-workflow",
   "displayName": "本地开发工作流",
-  "description": "在 VS Code 中用 Cline 实现、Codex 审查，并按 Git 提交验收。",
+  "description": "用 Cline 做后端实现，Codex/DSH 二选一作为前端规划与审查，可选 DSH 自审 + Codex 复审，并按 Git 提交验收。",
   "version": "0.5.10",
   "publisher": "local-workflow",
   "license": "UNLICENSED",
