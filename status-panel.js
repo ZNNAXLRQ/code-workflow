@@ -156,6 +156,8 @@ textarea{width:100%;box-sizing:border-box;min-height:54px;border:1px solid var(-
       </div>
       <h3>当前阶段</h3>
       <div id="stageCard"></div>
+      <h3>阶段任务</h3>
+      <div id="tasks"></div>
     </section>
     <section id="queueSection" hidden>
       <h3>等待开始的请求</h3>
@@ -416,7 +418,6 @@ function renderStageCard() {
                     (dependents.length ? '（依赖它的任务：' + dependents.map(item => item.title || item.id).join('、') + '）' : '');
                 card.append(node('p', line, 'label'));
             }
-            card.append(node('p', '依赖这些任务的工作会等待；不依赖它们的任务会继续。', 'label'));
         } else {
             card.append(node('p', '阶段已阻塞，等待处理。', 'label'));
         }
@@ -537,6 +538,36 @@ function renderStagePicker(list) {
     }
     picker.value = selectedId;
     $('stagePickerRow').hidden = list.length <= 1;
+}
+
+function renderTaskStatuses() {
+    const target = $('tasks');
+    if (!target) return;
+    const stage = selectedStage();
+    target.replaceChildren();
+    if (!stage) {
+        target.append(node('p', '选择阶段后显示任务。', 'label'));
+        return;
+    }
+    const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
+    if (!tasks.length) {
+        target.append(node('p', '这个阶段还没有任务。', 'label'));
+        return;
+    }
+    for (const task of tasks) {
+        const status = text(task.status) || '未知';
+        const card = node('div', '', 'card');
+        const top = node('div', '', 'row');
+        top.append(node('strong', task.title || task.id || '未命名任务'));
+        top.append(node('span', status, ['需处理', '已取消'].includes(status) ? 'badge danger' : 'badge'));
+        card.append(top);
+        if (Array.isArray(task.paths) && task.paths.length) {
+            card.append(node('p', '路径：' + task.paths.map(entry => text(entry)).join('、'), 'label'));
+        }
+        if (task.reason) card.append(node('p', '原因：' + shortReason(task.reason), 'label'));
+        card.append(node('p', '返修轮次：' + amount(Number(task.round)), 'label'));
+        target.append(card);
+    }
 }
 
 function renderQueue() {
@@ -731,6 +762,7 @@ function render() {
         const list = stages();
         renderStagePicker(list);
         renderStageCard();
+        renderTaskStatuses();
         renderQueue();
     }
     renderAcceptance();

@@ -132,15 +132,19 @@ text(html, 'function stageBlockedTasks(stage)', '阻塞任务识别');
 text(html, "['需处理', '已取消'].includes", '需处理/已取消任务视为阻塞');
 text(html, '阻塞任务：', '阻塞时显示卡住的任务');
 text(html, '依赖它的任务：', '阻塞信息提示受影响任务');
-text(html, '依赖这些任务的工作会等待；不依赖它们的任务会继续。', '不依赖阻塞任务的工作继续');
+missing(html, /依赖这些任务的工作会等待/, '已删除阻塞任务旁的废话');
 text(html, "['已验收', '已取消'].includes", '已验收/已取消阶段从活动列表消失');
 text(html, "send('action', { action: 'resume', run: stage.id })", '阻塞阶段只保留一个继续按钮');
 missing(html, /for \(const status of STATUSES\)/, '不再逐阶段渲染 7 个任务状态徽章');
-missing(html, /id="tasks"/, '不再渲染阶段任务列表');
+text(html, 'id="tasks"', '阶段任务容器恢复');
+text(html, '<h3>阶段任务</h3>', '「阶段任务」分区恢复');
+text(html, 'function renderTaskStatuses()', '任务状态列表渲染函数');
+text(html, 'const status = text(task.status)', '每个任务显示自己的状态');
+text(html, '返修轮次：', '任务显示返修轮次');
+text(html, '任务：共 ', '阶段摘要仍显示任务数量');
 missing(html, /阶段 = 一次完整开发/, '已删除阶段/任务解释长句');
 missing(html, /0 表示不自动返修/, '已删除返修上限说明');
-missing(html, /<h3>阶段任务<\/h3>/, '已删除「阶段任务」分区');
-ok('阶段只显示进行中/阻塞/待验收');
+ok('阶段只显示进行中/阻塞/待验收，任务状态仍完整展示');
 
 // --- 验收页 ---------------------------------------------------------------
 text(html, 'id="acceptanceQueue"', '待验收队列容器');
