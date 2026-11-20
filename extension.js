@@ -20,6 +20,7 @@ const { ReviewJournal } = require('./review-journal');
 const dshReview = require('./dsh-review');
 const dshFrontend = require('./dsh-frontend');
 const dshSessionInfo = require('./dsh-session-info');
+const dshBinding = require('./dsh-binding');
 
 const suggestedModel = 'mimo-v2.6:9b-q4_K_M';
 const liveItems = new Set();
@@ -38,7 +39,7 @@ function hubStatus(item, stageId) {
     }));
     return {
         repo: item.repo, frontend: item.frontend || 'codex', dshSessionId: item.dshSessionId || '',
-        dshSessionTitle: item.dshSessionTitle || '',
+        dshSessionTitle: item.dshSessionTitle || '', dshBinding: item.dshBinding || null,
         phase: item.state.phase, pipelinePaused: Boolean(item.pipelinePaused),
         queue: item.queue.length, archive: item.archive.length,
         boundThread: binding?.codexThreadId || item.codexThreadId || null, binding,
@@ -597,8 +598,20 @@ function activate(context) {
 
     async function switchFrontend(item, mode, options = {}) {
         if (!['codex', 'dsh'].includes(mode)) throw new Error('前端只能是 codex 或 dsh');
-        const dshSessionId = typeof options.dshSessionId === 'string'
+        let dshSessionId = typeof options.dshSessionId === 'string'
             ? options.dshSessionId.trim() : (item.dshSessionId || '');
+        let dshBound = null;
+        if (mode === 'dsh') {
+            dshBound = dshBinding.readDshBinding(item.repo);
+            if (!dshBound && dshSessionId) {
+                dshBound = dshBinding.bindDsh(item.repo, dshSessionId, { replace: true });
+            }
+            if (!dshBound) throw new Error('请先在设置页绑定 DSH 会话，再切换到 DSH 前端。');
+            dshSessionId = dshBound.dshSessionId;
+        } else {
+            try { dshBound = dshBinding.readDshBinding(item.repo); } catch {}
+            if (dshBound) dshSessionId = dshBound.dshSessionId;
+        }
         await item.outbox.load();
         try { await item.outbox.holdAllHandoff(); }
         catch (error) { throw new Error('无法暂存待发送交接消息，未切换前端：' + error.message); }
@@ -631,6 +644,7 @@ function activate(context) {
         dshFrontend.writeHandoff(item.repo, snapshot);
         item.frontend = frontend.mode;
         item.dshSessionId = frontend.dshSessionId;
+        item.dshBinding = dshBound;
         try { item.dshSessionTitle = dshSessionInfo.readDshSessionInfo(frontend.dshSessionId)?.title || ''; }
         catch { item.dshSessionTitle = ''; }
         item.frontendHandoff = snapshot;
@@ -828,8 +842,24 @@ function activate(context) {
                 try { frontend = dshFrontend.readFrontend(repo); } catch (error) { log('[frontend] ' + error.message); }
                 loaded.frontend = frontend.mode;
                 loaded.dshSessionId = frontend.dshSessionId;
-                try { loaded.dshSessionTitle = dshSessionInfo.readDshSessionInfo(frontend.dshSessionId)?.title || ''; }
-                catch { loaded.dshSessionTitle = ''; }
+                let loadedDshBinding = null;
+                try { loadedDshBinding = dshBinding.readDshBinding(repo); } catch (error) { log('[dsh-binding] ' + error.message); }
+                if (!loadedDshBinding && frontend.dshSessionId) {
+                    try {
+                        loadedDshBinding = dshBinding.bindDsh(repo, frontend.dshSessionId, { replace: true });
+                        log('[dsh-binding] 已迁移旧 DSH 会话绑定：' + frontend.dshSessionId);
+                    } catch (error) { log('[dsh-binding] ' + error.message); }
+                }
+                loaded.dshBinding = loadedDshBinding;
+                if (loadedDshBinding) {
+                    loaded.dshSessionId = loadedDshBinding.dshSessionId;
+                    loaded.dshSessionTitle = loadedDshBinding.title || '';
+                    if (frontend.mode === 'dsh' && frontend.dshSessionId !== loadedDshBinding.dshSessionId) {
+                        dshFrontend.writeFrontend(repo, { mode: 'dsh', dshSessionId: loadedDshBinding.dshSessionId });
+                    }
+                }
+                try { loaded.dshSessionTitle = dshSessionInfo.readDshSessionInfo(loaded.dshSessionId)?.title || loaded.dshSessionTitle || ''; }
+                catch { loaded.dshSessionTitle = loaded.dshSessionTitle || ''; }
                 try { loaded.frontendHandoff = dshFrontend.readHandoff(repo); } catch (error) { log('[frontend] ' + error.message); }
                 if (frontend.mode === 'dsh') {
                     await loaded.outbox.holdAllHandoff().catch(error => log('[outbox] 暂存交接消息失败：' + error.message));
@@ -1094,7 +1124,11 @@ function activate(context) {
         let binding = null;
         try { if (item) binding = bindingStore.readBinding(item.repo); } catch {}
         const frontend = item?.frontend || 'codex';
-        let dshSessionTitle = item?.dshSessionTitle || '';
+        let dshBound = item?.dshBinding || null;
+        if (item && !dshBound) {
+            try { dshBound = dshBinding.readDshBinding(item.repo); } catch {}
+        }
+        let dshSessionTitle = dshBound?.title || item?.dshSessionTitle || '';
         try { dshSessionTitle = dshSessionInfo.readDshSessionInfo(item?.dshSessionId)?.title || dshSessionTitle; } catch {}
         if (version !== publication || !view) return;
         if (item) refreshCodexTitle(item, refreshSettings).catch(() => {});
@@ -1109,7 +1143,8 @@ function activate(context) {
         await view.webview.postMessage({
             type: 'state', repo, folder: uri?.fsPath, frontend, folders: folders().map(entry => ({ name: entry.name, path: entry.uri.fsPath })),
             settings, refreshSettings, state: selected || { phase: '空闲', tasks: [] }, stages, binding,
-            dshSessionId: item?.dshSessionId || '', dshSessionTitle, frontendHandoff: item?.frontendHandoff || null,
+            dshSessionId: item?.dshSessionId || '', dshSessionTitle, dshBinding: dshBound,
+            frontendHandoff: item?.frontendHandoff || null,
             pipelinePaused: Boolean(item?.pipelinePaused),
             queue: item?.queue || [], conversation: item?.conversation || [],
             codexThreadId: item?.codexThreadId || '', chatting: Boolean(item?.chatController), canSteerChat: Boolean(item?.steerChat),
@@ -1286,6 +1321,43 @@ function activate(context) {
                 await item.saveBinding(id, metadata);
                 await view?.webview.postMessage({ type: 'codexBound', folder: uri.fsPath, id });
             } finally { item.binding = false; }
+            return;
+        }
+        if (message.type === 'dshBind') {
+            const sessionId = String(message.sessionId || '').trim();
+            if (!dshSessionInfo.validSessionId(sessionId)) throw new Error('DSH 会话 ID 格式无效：' + sessionId);
+            const info = dshSessionInfo.readDshSessionInfo(sessionId);
+            const bound = dshBinding.bindDsh(item.repo, sessionId, { replace: true });
+            item.dshBinding = bound;
+            item.dshSessionId = bound.dshSessionId;
+            item.dshSessionTitle = bound.title || info?.title || '';
+            if (item.frontend === 'dsh') {
+                dshFrontend.writeFrontend(item.repo, { mode: 'dsh', dshSessionId: bound.dshSessionId });
+            }
+            try {
+                projectSettings.updateSettings(item.repo, { dshSessionId: bound.dshSessionId }, {
+                    scope: 'folder', globalDefaults: configuration(vscode.Uri.file(item.repo))
+                });
+            } catch (error) { log('[dsh-binding] ' + error.message); }
+            if (!bound.title) vscode.window.showWarningMessage('DSH 会话已绑定，但缓存里暂时没有会话标题；首栏会先显示会话 ID。');
+            await item.save();
+            await publish(true);
+            return;
+        }
+        if (message.type === 'dshUnbind') {
+            if (item.frontend === 'dsh') throw new Error('请先切回 Codex，再解除 DSH 会话绑定。');
+            dshBinding.unbindDsh(item.repo);
+            item.dshBinding = null;
+            item.dshSessionId = '';
+            item.dshSessionTitle = '';
+            dshFrontend.writeFrontend(item.repo, { mode: item.frontend === 'dsh' ? 'dsh' : 'codex', dshSessionId: '' });
+            try {
+                projectSettings.updateSettings(item.repo, { dshSessionId: '' }, {
+                    scope: 'folder', globalDefaults: configuration(vscode.Uri.file(item.repo))
+                });
+            } catch (error) { log('[dsh-binding] ' + error.message); }
+            await item.save();
+            await publish(true);
             return;
         }
         if (message.type === 'codexOpen' || message.type === 'codexCopy') {

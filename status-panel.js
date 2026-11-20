@@ -114,6 +114,11 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
       <span class="label" id="pipelineState" aria-live="polite">调度：运行中</span>
       <span class="label" id="pipelineHint">在 Codex 里说“暂停调度/继续调度”即可，面板不直接控制。</span>
     </div>
+    <div class="notice" id="frontendNotice">
+      <strong id="frontendModeTitle">Codex 前端模式</strong>
+      <p class="label" id="frontendSessionLabel"></p>
+      <p class="label" id="frontendModeHint"></p>
+    </div>
     <section id="clineSection" hidden>
       <div class="notice">
         <strong>Cline 前端模式</strong>
@@ -141,11 +146,6 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
       </div>
     </section>
     <section id="codexSection">
-      <div class="notice" id="dshNotice" hidden>
-        <strong>DSH 前端模式</strong>
-        <p class="label" id="dshSessionLabel"></p>
-        <p class="label">规划和审查通过 DSH 的 local_workflow MCP 工具完成；本面板只负责状态、设置和验收。</p>
-      </div>
       <p class="label" id="glossary">阶段 = 一次完整开发（规划 → 实现 → 测试 → 审查 → 验收）；任务 = 阶段内拆分出的可并行工作项。</p>
       <div class="field" id="stagePickerRow" hidden>
         <label for="stagePicker">阶段</label>
@@ -198,9 +198,16 @@ select,input[type=text],input[type=number]{border:1px solid var(--vscode-input-b
     </div>
     <section id="bindingSection">
       <h3>会话绑定</h3>
-      <div class="field">
-        <label for="sDshSessionId">DSH 会话 ID</label>
-        <input id="sDshSessionId" type="text" placeholder="会话 ID；可留空后在 DSH 中绑定" autocomplete="off">
+      <h4>DSH 会话</h4>
+      <p class="label" id="dshBoundSession">未绑定</p>
+      <p class="label" id="dshBindingDetail"></p>
+      <div class="field" id="dshBindField">
+        <label for="dshThreadInput">DSH 会话 ID</label>
+        <input id="dshThreadInput" type="text" spellcheck="false" placeholder="session-…" autocomplete="off">
+        <button type="button" class="primary" id="dshBindButton">绑定</button>
+      </div>
+      <div class="buttons" id="dshUnbindRow">
+        <button type="button" class="secondary danger" id="dshUnbindButton">解除绑定</button>
       </div>
       <h4>Codex 会话</h4>
       <p class="label" id="boundSession">未绑定</p>
@@ -539,7 +546,6 @@ function renderSettings() {
             if (Array.from($('sRepairs').options).some(option => option.value === value)) $('sRepairs').value = value;
         });
         keepField($('sDshFrontend'), () => { $('sDshFrontend').checked = settings.useDshFrontend === true; });
-        keepField($('sDshSessionId'), () => { $('sDshSessionId').value = text(settings.dshSessionId || ''); });
         keepField($('sReviewCodex'), () => { $('sReviewCodex').checked = settings.reviewCodex !== false; });
         keepField($('sReviewDsh'), () => { $('sReviewDsh').checked = settings.reviewDsh === true; });
         keepField($('sInitialCommit'), () => { $('sInitialCommit').checked = settings.initialCommit === true; });
@@ -551,7 +557,6 @@ function renderSettings() {
     $('sParallel').disabled = !ready;
     $('sRepairs').disabled = !ready;
     $('sDshFrontend').disabled = !ready;
-    $('sDshSessionId').disabled = !ready;
     $('sReviewCodex').disabled = !ready;
     $('sReviewDsh').disabled = !ready;
     $('sInitialCommit').disabled = !ready;
@@ -630,30 +635,65 @@ function renderHeaderSessions() {
     $('codexSessionName').textContent = codex ? text(codex) : '未绑定';
     $('codexSessionName').title = codex ? text(codex) : '';
     const settings = data && data.settings && typeof data.settings === 'object' ? data.settings : {};
+    const dshBound = data && data.dshBinding && typeof data.dshBinding === 'object' ? data.dshBinding : null;
     const dshId = (data && data.dshSessionId) || settings.dshSessionId || '';
-    const dshTitle = (data && data.dshSessionTitle) || '';
+    const dshTitle = (dshBound && dshBound.title) || (data && data.dshSessionTitle) || '';
     $('dshSessionName').textContent = dshTitle || (dshId ? text(dshId) : '未绑定');
     $('dshSessionName').title = dshId ? text(dshTitle ? dshTitle + ' · ' + dshId : dshId) : '';
+}
+
+function renderDshBinding() {
+    const bound = data && data.dshBinding && typeof data.dshBinding === 'object' ? data.dshBinding : null;
+    const ready = Boolean(data && data.repo);
+    $('dshBoundSession').textContent = bound
+        ? 'DSH 会话 · ' + (text(bound.title) || tail(bound.dshSessionId))
+        : '未绑定';
+    $('dshBoundSession').title = bound ? text(bound.dshSessionId) : '';
+    $('dshBindingDetail').textContent = bound
+        ? '会话 ID ' + text(bound.dshSessionId || '') + ' · 工作目录 ' + text(bound.workingDirectory || '未知') +
+            ' · 绑定时间 ' + text(bound.boundAt || '')
+        : '还没有绑定 DSH 会话；绑定后首栏会显示会话标题。';
+    $('dshBindField').hidden = Boolean(bound);
+    $('dshUnbindRow').hidden = !bound;
+    $('dshThreadInput').disabled = !ready;
+    $('dshBindButton').disabled = !ready;
+    $('dshUnbindButton').disabled = !ready || Boolean(data && data.frontend === 'dsh');
+    $('dshUnbindButton').title = data && data.frontend === 'dsh' ? '请先切回 Codex 再解除 DSH 绑定' : '';
+}
+
+function renderFrontendNotice() {
+    const frontend = (data && data.frontend) || 'codex';
+    const bound = binding();
+    const codexName = (data && data.codexMetadata && (data.codexMetadata.title || data.codexMetadata.name)) ||
+        (bound && bound.codexThreadId) || (data && data.codexThreadId) || '';
+    const dshBound = data && data.dshBinding && typeof data.dshBinding === 'object' ? data.dshBinding : null;
+    const dshName = (dshBound && dshBound.title) || (data && data.dshSessionTitle) || (data && data.dshSessionId) || '';
+    const notice = $('frontendNotice');
+    if (!notice) return;
+    notice.hidden = frontend === 'cline';
+    if (frontend === 'dsh') {
+        $('frontendModeTitle').textContent = 'DSH 前端模式';
+        $('frontendSessionLabel').textContent = '会话：' + (dshName || '未绑定');
+        $('frontendModeHint').textContent = '规划和审查通过 DSH 的 local_workflow MCP 工具完成；本面板只负责状态、设置和验收。';
+    } else {
+        $('frontendModeTitle').textContent = 'Codex 前端模式';
+        $('frontendSessionLabel').textContent = '会话：' + (codexName || '未绑定');
+        $('frontendModeHint').textContent = '规划和复审在 Codex 会话里完成；本面板只负责状态、设置和验收。';
+    }
 }
 
 function render() {
     const main = $('main');
     const scrollTop = main.scrollTop;
     const cline = clineMode();
-    const dsh = Boolean(data && data.frontend === 'dsh');
     const repo = data && data.repo ? text(data.repo)
         : data && data.folder ? text(data.folder)
             : '未打开工作区';
     $('repo').textContent = repo;
     renderHeaderSessions();
+    renderFrontendNotice();
     $('codexSection').hidden = cline;
     $('clineSection').hidden = !cline;
-    $('dshNotice').hidden = !dsh;
-    if (dsh) {
-        $('dshSessionLabel').textContent = data.dshSessionId
-            ? ('会话：' + (data.dshSessionTitle || '未命名') + ' · ' + text(data.dshSessionId))
-            : '未绑定 DSH 会话 ID；可在设置中填写。';
-    }
     renderPipeline();
     if (cline) {
         $('queueSection').hidden = true;
@@ -666,6 +706,7 @@ function render() {
         renderQueue();
     }
     renderBinding();
+    renderDshBinding();
     renderSettings();
     main.scrollTop = scrollTop;
 }
@@ -677,6 +718,7 @@ function signatureOf(incoming) {
         frontend: incoming.frontend || 'codex',
         dshSessionId: incoming.dshSessionId || '',
         dshSessionTitle: incoming.dshSessionTitle || '',
+        dshBinding: incoming.dshBinding || null,
         codexTitle: incoming.codexMetadata && (incoming.codexMetadata.title || incoming.codexMetadata.name) || '',
         paused: Boolean(incoming.pipelinePaused),
         state: incoming.state && incoming.state.id,
@@ -764,7 +806,6 @@ $('saveSettings').onclick = () => {
         maxParallel: $('sParallel').value,
         maxRepairs: maxRepairs,
         useDshFrontend: $('sDshFrontend').checked,
-        dshSessionId: $('sDshSessionId').value.trim(),
         reviewCodex: $('sReviewCodex').checked,
         reviewDsh: $('sReviewDsh').checked,
         initialCommit: $('sInitialCommit').checked
@@ -779,6 +820,21 @@ $('bindButton').onclick = () => {
     }
     showError('');
     send('bind', { threadId: threadId });
+};
+
+$('dshBindButton').onclick = () => {
+    const sessionId = $('dshThreadInput').value.trim();
+    if (!sessionId) {
+        showError('请粘贴 DSH 会话 ID。');
+        return;
+    }
+    showError('');
+    send('dshBind', { sessionId });
+};
+
+$('dshUnbindButton').onclick = () => {
+    showError('');
+    send('dshUnbind');
 };
 
 $('unbindButton').onclick = () => {

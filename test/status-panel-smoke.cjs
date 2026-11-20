@@ -91,7 +91,24 @@ text(html, 'id="dshSessionName"', '首栏 DSH 会话名称');
 text(html, 'function renderHeaderSessions()', '首栏会话名称渲染函数');
 text(html, "const codex = (data && data.codexMetadata", 'Codex 名称优先使用 Codex 标题');
 text(html, "const dshId = (data && data.dshSessionId) || settings.dshSessionId", 'DSH 名称读取绑定 ID');
-text(html, "const dshTitle = (data && data.dshSessionTitle) || ''", 'DSH 名称读取会话标题');
+text(html, "const dshTitle = (dshBound && dshBound.title) || (data && data.dshSessionTitle) || ''", 'DSH 名称读取绑定标题');
+
+// 任务页统一前端模式提示
+text(html, 'id="frontendNotice"', '任务页前端模式提示');
+text(html, 'id="frontendModeTitle"', '前端模式标题');
+text(html, 'id="frontendSessionLabel"', '前端会话名称');
+text(html, 'function renderFrontendNotice()', '前端模式提示渲染函数');
+text(html, "'Codex 前端模式'", 'Codex 模式提示');
+text(html, "'DSH 前端模式'", 'DSH 模式提示');
+text(html, "notice.hidden = frontend === 'cline'", '前端提示按模式显示');
+
+// DSH 绑定卡片
+text(html, 'id="dshBindField"', 'DSH 绑定输入区');
+text(html, 'DSH 会话 ID', 'DSH 绑定字段名');
+text(html, 'function renderDshBinding()', 'DSH 绑定渲染函数');
+text(html, "send('dshBind', { sessionId })", 'DSH 绑定发送 dshBind');
+text(html, "send('dshUnbind')", 'DSH 解绑发送 dshUnbind');
+text(html, '请先切回 Codex 再解除 DSH 绑定', 'DSH 前端模式解绑限制');
 
 // 刷新在 tab 同一排右侧
 assert.ok(html.indexOf('id="refresh"') < html.indexOf('</nav>'), '刷新按钮必须在 tab 导航行内');
@@ -166,7 +183,8 @@ text(html, 'data && data.folder ? text(data.folder)', '无 repo 时回退 worksp
 text(html, ": '未打开工作区';", '都没有时显示未打开工作区');
 
 // --- 设置项（仅项目局部） -------------------------------------------------
-for (const id of ['sParallel', 'sRepairs', 'sDshFrontend', 'sDshSessionId', 'sReviewCodex', 'sReviewDsh', 'sInitialCommit', 'saveSettings']) {
+for (const id of ['sParallel', 'sRepairs', 'sDshFrontend', 'sReviewCodex', 'sReviewDsh', 'sInitialCommit', 'saveSettings',
+    'dshBoundSession', 'dshBindingDetail', 'dshThreadInput', 'dshBindButton', 'dshUnbindButton']) {
     text(html, 'id="' + id + '"', '设置控件 ' + id);
 }
 for (const value of ['value="1"', 'value="2"', 'value="4"', 'value="8"', 'value="unlimited"']) {
@@ -184,7 +202,6 @@ has(html, /scope: 'folder'/, 'settings 消息固定 scope=folder');
 text(html, 'maxParallel:', 'settings 字段 maxParallel');
 text(html, 'maxRepairs:', 'settings 字段 maxRepairs');
 text(html, 'useDshFrontend:', 'settings 字段 useDshFrontend');
-text(html, 'dshSessionId:', 'settings 字段 dshSessionId');
 text(html, 'reviewCodex:', 'settings 字段 reviewCodex');
 text(html, 'reviewDsh:', 'settings 字段 reviewDsh');
 text(html, 'initialCommit:', 'settings 字段 initialCommit');
